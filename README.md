@@ -1,93 +1,133 @@
-# SIS325-G6-TechMock AI
+# TechMock AI - Landing Page
 
+Una landing page moderna desarrollada con Next.js 16, React 19, Firebase Authentication y Tailwind CSS.
 
+## ✨ Características
 
-## Getting started
+- 🎨 **Diseño Moderno**: Interfaz futurista con colores verde neón y efectos visuales
+- 🔐 **Autenticación Firebase**: Sistema completo de login/registro
+- 📱 **Responsive Design**: Adaptable a móviles, tablets y desktop
+- 🧩 **Arquitectura Modular**: Componentes y hooks organizados y reutilizables
+- ⚡ **Terminal Animada**: Componente 3D con efectos de disparo y animaciones
+- 🎯 **Dashboard Interactivo**: Panel de control estilo "Mission Control"
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## 📁 Estructura del Proyecto
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/CristianJaldinPereira/sis325-g6-techmock-ai.git
-git branch -M main
-git push -uf origin main
+techmock-ai/
+├── app/                    # Next.js App Router
+│   ├── auth/              # Página de autenticación
+│   ├── dashboard/         # Dashboard principal
+│   ├── globals.css        # Estilos globales
+│   ├── layout.tsx         # Layout principal
+│   └── page.tsx           # Página de inicio
+├── components/            # Componentes reutilizables
+│   ├── AnalysisSection.tsx
+│   ├── Footer.tsx
+│   ├── Header.tsx
+│   ├── HeroSection.tsx
+│   ├── InfrastructureSection.tsx
+│   ├── RotatingCube.tsx
+│   └── index.ts           # Exportaciones centralizadas
+├── contexts/              # React Contexts
+│   └── AuthContext.tsx    # Contexto de autenticación
+├── hooks/                 # Hooks personalizados
+│   ├── useMenu.ts         # Manejo del menú móvil
+│   ├── useNavigation.ts   # Navegación centralizada
+│   └── index.ts           # Exportaciones centralizadas
+├── lib/                   # Utilidades y configuraciones
+│   └── firebase.ts        # Configuración de Firebase
+└── types/                 # Definiciones de tipos TypeScript
+    └── index.ts
 ```
 
-## Integrate with your tools
+## 🚀 Instalación y Uso
 
-* [Set up project integrations](https://gitlab.com/CristianJaldinPereira/sis325-g6-techmock-ai/-/settings/integrations)
+1. **Instalar dependencias**
+   ```bash
+   npm install
+   ```
 
-## Collaborate with your team
+2. **Ejecutar en desarrollo**
+   ```bash
+   npm run dev
+   ```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+3. **Acceder a la aplicación**
+   - Landing page: http://localhost:3000
+   - Autenticación: http://localhost:3000/auth
+   - Dashboard: http://localhost:3000/dashboard
 
-## Test and Deploy
+## 🏗️ Arquitectura
 
-Use the built-in continuous integration in GitLab.
+### Hooks Personalizados
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+- **`useNavigation`**: Maneja la navegación entre páginas con validación de autenticación
+- **`useMenu`**: Controla el estado del menú móvil con callbacks optimizados
 
-***
+### Componentes Modulares
 
-# Editing this README
+- **`Header`**: Navegación principal con menú responsive
+- **`HeroSection`**: Sección principal con terminal animada
+- **`RotatingCube`**: Terminal 3D con efectos de disparo CSS puro
+- **`InfrastructureSection`**: Características del producto
+- **`AnalysisSection`**: Información sobre análisis arquitectónico
+- **`Footer`**: Enlaces organizados por categorías
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+### Gestión de Estado
 
-## Suggestions for a good README
+- **AuthContext**: Manejo global de autenticación Firebase
+- **Estado local**: Usando hooks nativos de React para UI
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## 🎨 Diseño
 
-## Name
-Choose a self-explaining name for your project.
+- **Paleta de colores**: Negro (#000000), Gris oscuro (#1a1a1a), Verde neón (#00ff00)
+- **Tipografía**: Geist Sans para textos, Courier New para código
+- **Animaciones**: CSS puro para máximo rendimiento
+- **Responsive**: Mobile-first con Tailwind CSS
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## 🔧 Tecnologías
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+- **Frontend**: Next.js 16 + React 19 + TypeScript
+- **Styling**: Tailwind CSS 4 + CSS-in-JS para animaciones
+- **Backend**: Firebase Authentication + Firestore
+- **Desarrollo**: ESLint + Turbopack
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## 📋 Scripts Disponibles
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+npm run dev      # Servidor de desarrollo
+npm run build    # Build de producción
+npm run start    # Servidor de producción
+npm run lint     # Linter ESLint
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## 🔐 Autenticación
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Funcionalidades
+- ✅ Registro de usuarios
+- ✅ Inicio de sesión
+- ✅ Protección de rutas
+- ✅ Estado persistente
+- ✅ Logout seguro
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### Configuración Firebase
+Firebase ya está configurado y listo para usar. Las credenciales están incluidas en `lib/firebase.ts`.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## 🎯 Funcionalidades del Dashboard
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+- **Métricas en tiempo real**: CPU, Memory, Connections
+- **Terminal de logs**: Actualizaciones automáticas cada 3s
+- **Centro de análisis**: Progreso de análisis arquitectónico
+- **Alertas activas**: Sistema de notificaciones
+- **Acciones rápidas**: Botones para funciones principales
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## 📱 Responsive Design
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- **Mobile**: Menú hamburguesa, layout vertical
+- **Tablet**: Navegación adaptativa, grid responsive
+- **Desktop**: Navegación completa, efectos hover
 
-## License
-For open source projects, say how it is licensed.
+---
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Desarrollado con ❤️ usando Next.js y Firebase
