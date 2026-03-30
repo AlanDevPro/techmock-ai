@@ -22,7 +22,7 @@ const TerminalPreview: React.FC = () => {
     <div className="relative">
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
         <div className="flex items-center justify-between mb-4">
-          <span className="text-[#00ff00] text-sm font-mono">análisis_arquitectónico.log</span>
+          <span className="text-[#00ff00] text-sm font-mono">reporte_entrevista.log</span>
           <div className="flex space-x-1">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
             <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
@@ -30,11 +30,11 @@ const TerminalPreview: React.FC = () => {
           </div>
         </div>
         <div className="font-mono text-sm space-y-2">
-          <div className="text-[#00ff00]">✓ Escaneando arquitectura...</div>
-          <div className="text-gray-400">  → 847 archivos analizados</div>
-          <div className="text-yellow-400">⚠ Acoplamiento alto detectado en /core</div>
-          <div className="text-[#00ff00]">✓ Sugerencia: Implementar patrón Repository</div>
-          <div className="text-blue-400">ℹ Análisis completado en 0.3s</div>
+          <div className="text-[#00ff00]">✓ Entrevista completada</div>
+          <div className="text-gray-400">  → Tiempo total: 32:15</div>
+          <div className="text-[#00ff00]">✓ Solución correcta - O(n log n)</div>
+          <div className="text-yellow-400">⚠ Mejora: Considera manejo de edge cases</div>
+          <div className="text-blue-400">→ Puntuación: 8.5/10</div>
         </div>
       </div>
     </div>
@@ -43,9 +43,9 @@ const TerminalPreview: React.FC = () => {
 
 export const AnalysisSection: React.FC = () => {
   const features = [
-    "Análisis de dependencias y acoplamiento",
-    "Detección de anti-patrones arquitectónicos",
-    "Recomendaciones de mejora automatizadas"
+    "Complejidad de Tiempo y Espacio (Big O) explicada paso a paso",
+    "Patrones de diseño que aplicaste (¿bien o mal?)",
+    "Bugs encontrados y cómo habrías fallado en la entrevista real"
   ];
 
   return (
@@ -54,19 +54,21 @@ export const AnalysisSection: React.FC = () => {
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div>
             <h2 className="text-4xl font-bold mb-6">
-              Más allá de Pruebas Simples.{" "}
-              <span className="text-[#00ff00]">Análisis Arquitectónico</span>
+              No es solo Pasar o Fallar.{" "}
+              <span className="text-[#00ff00]">Es Aprender</span>
             </h2>
             <p className="text-xl text-gray-300 mb-8">
-              No solo probamos código, analizamos arquitecturas completas. Identificamos
-              cuellos de botella, patrones anti-arquitectónicos y oportunidades de optimización
-              antes de que se conviertan en problemas críticos.
+              Cada simulación genera un reporte detallado. Sabrás exactamente qué hiciste bien,
+              dónde fallaste y por qué. Es como tener un Senior mentor revisando tu código en tiempo real.
             </p>
             <ul className="space-y-4 text-gray-300">
               {features.map((feature, index) => (
                 <FeatureListItem key={index} text={feature} />
               ))}
             </ul>
+            <p className="text-gray-400 mt-8 text-sm italic">
+              💡 Tip: Haz simulaciones 2-3 veces por semana. Después de 4 semanas, estarás listo.
+            </p>
           </div>
 
           <TerminalPreview />

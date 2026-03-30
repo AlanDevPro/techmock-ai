@@ -6,7 +6,9 @@ import {
   Header,
   HeroSection,
   InfrastructureSection,
+  ProblemsSection,
   AnalysisSection,
+  CTASection,
   Footer
 } from '../components';
 
@@ -43,7 +45,11 @@ export default function Home() {
 
       <InfrastructureSection />
 
+      <ProblemsSection />
+
       <AnalysisSection />
+
+      <CTASection onStartClick={navigateToAuth} />
 
       <Footer />
     </div>

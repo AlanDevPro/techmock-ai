@@ -7,7 +7,10 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  signInWithPopup,
+  GoogleAuthProvider,
+  GithubAuthProvider
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
@@ -16,6 +19,8 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
+  loginWithGithub: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -61,6 +66,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const loginWithGoogle = async () => {
+    try {
+      const googleProvider = new GoogleAuthProvider();
+      await signInWithPopup(auth, googleProvider);
+    } catch (error: any) {
+      throw new Error(error.message);
+    }
+  };
+
+  const loginWithGithub = async () => {
+    try {
+      const githubProvider = new GithubAuthProvider();
+      await signInWithPopup(auth, githubProvider);
+    } catch (error: any) {
+      throw new Error(error.message);
+    }
+  };
+
   const logout = async () => {
     try {
       await signOut(auth);
@@ -74,6 +97,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     loading,
     login,
     register,
+    loginWithGoogle,
+    loginWithGithub,
     logout
   };
 
