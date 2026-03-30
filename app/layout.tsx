@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "../contexts/AuthContext";
+import { Providers } from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DEV_STREAM - Ingeniería para Arquitectos",
-  description: "Motor de evaluación de ultra-baja latencia diseñado para arquitectos de software que necesitan análisis en tiempo real y revisiones de código inteligentes.",
+  title: "TechMock AI - Simulador de Entrevistas Técnicas",
+  description: "Simulador interactivo de entrevistas de programación impulsado por IA. Practica con preguntas adaptativas, obtén retroalimentación técnica inmediata y domina las entrevistas de tu próximo trabajo.",
 };
 
 export default function RootLayout({
@@ -26,12 +26,13 @@ export default function RootLayout({
   return (
     <html
       lang="es"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
+        <Providers>
           {children}
-        </AuthProvider>
+        </Providers>
       </body>
     </html>
   );

@@ -43,27 +43,27 @@ const FooterSection: React.FC<FooterSectionProps> = ({ title, links }) => {
 export const Footer: React.FC = () => {
   const footerSections = [
     {
-      title: "Producto",
+      title: "Aprende",
       links: [
-        { href: "#", label: "Características" },
-        { href: "#", label: "Precios" },
-        { href: "#", label: "API" }
+        { href: "#", label: "Guía de Inicio" },
+        { href: "#", label: "Algoritmos Básicos" },
+        { href: "#", label: "Estructuras de Datos" }
       ]
     },
     {
-      title: "Empresa",
+      title: "Práctica",
       links: [
-        { href: "#", label: "Acerca de" },
-        { href: "#", label: "Blog" },
-        { href: "#", label: "Carreras" }
+        { href: "#", label: "Problemas Junior" },
+        { href: "#", label: "Entrevistas Simuladas" },
+        { href: "#", label: "Reportes" }
       ]
     },
     {
-      title: "Soporte",
+      title: "Comunidad",
       links: [
-        { href: "#", label: "Documentación" },
-        { href: "#", label: "Contacto" },
-        { href: "#", label: "Estado" }
+        { href: "#", label: "Discord Junior" },
+        { href: "#", label: "Blog de Tips" },
+        { href: "#", label: "Preguntas Frecuentes" }
       ]
     }
   ];
@@ -74,9 +74,9 @@ export const Footer: React.FC = () => {
         <div className="grid md:grid-cols-4 gap-8">
           {/* Brand Section */}
           <div>
-            <h3 className="text-[#00ff00] text-xl font-bold mb-4">DEV_STREAM</h3>
+            <h3 className="text-[#00ff00] text-xl font-bold mb-4">TechMock AI</h3>
             <p className="text-gray-400">
-              Plataforma de análisis arquitectónico para equipos de desarrollo modernos.
+              La plataforma para que junior egresados dominen entrevistas técnicas y consigan su primer trabajo.
             </p>
           </div>
 
@@ -94,7 +94,7 @@ export const Footer: React.FC = () => {
         <div className="border-t border-gray-800 mt-12 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm">
-              © 2026 DEV_STREAM. Todos los derechos reservados.
+              © 2026 TechMock AI. Hecho para Junior Developers.
             </p>
             <div className="flex space-x-6 mt-4 md:mt-0">
               <a href="#" className="text-gray-400 hover:text-[#00ff00] transition-colors duration-200">

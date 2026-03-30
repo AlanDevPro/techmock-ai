@@ -23,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({ onNavigate }) => {
           {/* Logo */}
           <div className="flex-shrink-0">
             <h1 className="text-2xl font-bold text-[#00ff00] cursor-pointer" onClick={() => handleNavigation('/')}>
-              DEV_STREAM
+              TechMock AI
             </h1>
           </div>
 
