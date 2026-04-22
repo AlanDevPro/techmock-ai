@@ -64,3 +64,4 @@ El presente marco de programación provee una interfaz gráfica nativa documenta
 5. Ejecute mediante la tecla designada como **Execute**.
 
 El modelo de inferencia responderá a la solicitud y generará un esquema JSON final listo para exportación.
+//////////////////////////////////////////////////////////////////////
