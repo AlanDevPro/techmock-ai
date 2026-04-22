@@ -89,6 +89,12 @@ export default function Dashboard() {
               {user.displayName || user.email}
             </div>
             <button
+              onClick={() => router.push('/ide')}
+              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-4 py-1.5 rounded text-sm font-bold transition-colors"
+            >
+              Iniciar prueba
+            </button>
+            <button
               onClick={handleLogout}
               className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded text-sm font-medium transition-colors"
             >
