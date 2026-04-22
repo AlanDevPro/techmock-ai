@@ -1,0 +1,10 @@
+from fastapi import FastAPI
+from app.api.endpoints import router as api_router
+
+app = FastAPI(title="Generador RAG Evaluaciones Técnicas")
+
+app.include_router(api_router, prefix="/api")
+
+@app.get("/")
+def read_root():
+    return {"message": "API RAG Activada y en formato de red local. Dirigirse a /docs para consultar documentación de endpoints provistos en formato Swagger."}
