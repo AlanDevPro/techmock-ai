@@ -32,4 +32,9 @@ async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
         data = json.loads(respuesta.content)
         return data
     except Exception as e:
-        return {"preguntas": [], "error_por_falta_de_contexto": f"Error de arquitectura JSON en el render LLM: {str(e)}"}
+        return {
+            "pregunta_practica": "",
+            "comprension_a_evaluar": "",
+            "explicacion_codigo_esperado": "",
+            "error_por_falta_de_contexto": f"Error de arquitectura JSON en el render LLM: {str(e)}",
+        }

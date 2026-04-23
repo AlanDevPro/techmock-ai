@@ -24,8 +24,12 @@ export default function IDEPage() {
     }
   };
 
-  const handleOpenIDE = () => {
-    window.open('http://localhost:3001', '_blank');
+  const handleOpenIDE = (framework: 'vuejs' | 'nextjs') => {
+    window.open(`http://localhost:3001?framework=${framework}`, '_blank');
+  };
+
+  const handleStart = (framework: 'vuejs' | 'nextjs') => {
+    handleOpenIDE(framework);
   };
 
   if (!user) return null;
@@ -61,49 +65,49 @@ export default function IDEPage() {
         </div>
       </nav>
 
-      {/* Contenedor Principal con dos secciones */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Sección de Problemas - Arriba */}
-        <div className="bg-gray-950 border-b border-gray-800 overflow-y-auto" style={{height: '35%'}}>
-          <div className="p-6 max-w-7xl mx-auto">
-            <h2 className="text-2xl font-bold text-white mb-4">Problemas a Resolver</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Espacio para que agregues los problemas */}
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 hover:border-[#00ff00] transition-colors">
-                <h3 className="text-lg font-semibold text-[#00ff00] mb-2">Problema 1</h3>
-                <p className="text-gray-400 text-sm mb-3">
-                  Descripción del problema que deberá resolver...
-                </p>
-                <div className="flex items-center space-x-2 text-xs text-gray-500">
-                  <span className="bg-blue-600 text-white px-2 py-1 rounded">Intermedio</span>
-                  <span>~30 min</span>
-                </div>
-              </div>
-
-              <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 hover:border-[#00ff00] transition-colors">
-                <h3 className="text-lg font-semibold text-[#00ff00] mb-2">Problema 2</h3>
-                <p className="text-gray-400 text-sm mb-3">
-                  Descripción del problema que deberá resolver...
-                </p>
-                <div className="flex items-center space-x-2 text-xs text-gray-500">
-                  <span className="bg-green-600 text-white px-2 py-1 rounded">Avanzado</span>
-                  <span>~45 min</span>
-                </div>
-              </div>
+      {/* Contenedor Principal */}
+      <div className="flex-1 overflow-hidden flex flex-col items-center justify-center bg-gray-900 p-6 text-center">
+        <div className="max-w-4xl w-full">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-800 border border-gray-700 text-xs uppercase tracking-widest text-gray-400 mb-4">
+            Modo Prueba Activo
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">
+            Elige tu entorno de prueba
+          </h2>
+          <p className="text-gray-400 text-base md:text-lg">
+            Inicia el editor en una nueva ventana y resuelve los retos con el stack que prefieras.
+            Tu avance se guarda automaticamente y puedes volver cuando quieras.
+          </p>
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <button
+              onClick={() => handleStart('vuejs')}
+              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105"
+            >
+              ▶ Prueba con Vue.js
+            </button>
+            <button
+              onClick={() => handleStart('nextjs')}
+              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105"
+            >
+              ▶ Prueba con Next.js
+            </button>
+          </div>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Duracion estimada</p>
+              <p className="text-lg text-white font-semibold">30 a 45 min</p>
+            </div>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Nivel sugerido</p>
+              <p className="text-lg text-white font-semibold">Intermedio / Avanzado</p>
+            </div>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Formato</p>
+              <p className="text-lg text-white font-semibold">Editor en vivo</p>
             </div>
           </div>
-        </div>
-
-        {/* Sección del IDE - Abajo */}
-        <div className="flex-1 overflow-hidden flex flex-col items-center justify-center bg-gray-900 p-4" style={{height: '65%'}}>
-          <button
-            onClick={handleOpenIDE}
-            className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-xl font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105"
-          >
-            ▶ Abrir IDE en Nueva Ventana
-          </button>
-          <p className="text-gray-400 mt-4 text-center">
-            Se abrirá el editor de código en una nueva ventana
+          <p className="text-gray-500 mt-5 text-sm">
+            Se abrira el editor de codigo en una nueva ventana
           </p>
         </div>
       </div>

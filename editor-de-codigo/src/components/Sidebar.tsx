@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, FileCode, FileJson, FileType2, FileBox, RefreshCw, FilePlus, FolderPlus, Trash } from 'lucide-react';
 import { getWebContainer } from '@/lib/webcontainer';
 
@@ -171,9 +171,18 @@ export default function Sidebar({ activeFile, onSelectFile, files, onRefresh }: 
   const [renaming, setRenaming] = useState<string | null>(null);
   const [selectedDir, setSelectedDir] = useState<string>("");
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [visibleRoot, setVisibleRoot] = useState<string | null>(null);
   
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, nodePath: string, key: string, isFolder: boolean } | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const framework = params.get('framework');
+    if (framework === 'vuejs') setVisibleRoot('/practica-vue');
+    if (framework === 'nextjs') setVisibleRoot('/practica-nextjs');
+  }, []);
 
   const buildTree = (filePaths: string[]) => {
     const root: any = {};
@@ -197,7 +206,11 @@ export default function Sidebar({ activeFile, onSelectFile, files, onRefresh }: 
     return root;
   };
 
-  const treeData = buildTree(Object.keys(files));
+  const filePaths = Object.keys(files);
+  const filteredPaths = visibleRoot
+    ? filePaths.filter((path) => path === visibleRoot || path.startsWith(`${visibleRoot}/`))
+    : filePaths;
+  const treeData = buildTree(filteredPaths);
 
   const handleCreateFile = () => {
     if (selectedDir !== "") {
