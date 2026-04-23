@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigation } from '../hooks';
 import {
   Header,
@@ -11,9 +11,21 @@ import {
   CTASection,
   Footer
 } from '../components';
+import { AuthCard } from '../components/AuthCard';
 
 export default function Home() {
   const { navigateToAuth, navigateToDashboard, navigateToHome } = useNavigation();
+  const [showAuthOverlay, setShowAuthOverlay] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowAuthOverlay(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleNavigation = (route: string) => {
     switch (route) {
@@ -39,7 +51,7 @@ export default function Home() {
       <Header onNavigate={handleNavigation} />
 
       <HeroSection
-        onLoginClick={navigateToAuth}
+        onLoginClick={() => setShowAuthOverlay(true)}
         onArchitectureClick={navigateToDashboard}
       />
 
@@ -52,6 +64,19 @@ export default function Home() {
       <CTASection onStartClick={navigateToAuth} />
 
       <Footer />
+
+      {showAuthOverlay && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <button
+            className="absolute inset-0 w-full h-full cursor-default"
+            onClick={() => setShowAuthOverlay(false)}
+            aria-label="Cerrar"
+          />
+          <div className="relative w-full max-w-md">
+            <AuthCard showClose onClose={() => setShowAuthOverlay(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

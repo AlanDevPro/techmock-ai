@@ -19,4 +19,7 @@ Parámetros Estructurales del Desafío de Código:
 Lineamientos de Compilación de Salida:
 - Formateé estructuralmente UN SOLO objeto de respuesta JSON sin agruparlo en listas (arrays).
 - Absténgase de enviar demarcadores visuales o etiquetas de formato markdown. La respuesta debe corresponder al estado puro de codificación JSON.
+- Es OBLIGATORIO completar TODOS los campos del JSON con contenido final, sin frases cortadas, sin puntos suspensivos, sin "...", y sin texto incompleto.
+- No omita claves ni entregue valores nulos. Si falta contexto, complete los campos con una explicación breve y coherente y use error_por_falta_de_contexto para justificar.
+- Verifique internamente que el JSON sea valido y cierre todas las comillas antes de responder.
 """
