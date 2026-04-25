@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
 from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
 import os
@@ -37,11 +37,23 @@ async def generar_preguntas_next_get():
 
 
 # -----------------------------
-# 🔥 NUEVO ENDPOINT ANALIZAR CÓDIGO
+# 🔥 ENDPOINT ANALIZAR CÓDIGO PRO
 # -----------------------------
 @router.post("/analizar-codigo", response_model=RespuestaAnalisisCodigo)
 async def analizar_codigo(data: dict):
-    codigo = data.get("codigo", "")
-    framework = data.get("framework", "general")
+    codigo = data.get("codigo", "").strip()
+    framework = data.get("framework", "general").strip()
+
+    if not codigo:
+        raise HTTPException(
+            status_code=400,
+            detail="El campo 'codigo' es requerido y no puede estar vacío."
+        )
+
+    if len(codigo) > 10_000:
+        raise HTTPException(
+            status_code=413,
+            detail="El código excede el límite de 10,000 caracteres."
+        )
 
     return await analizar_codigo_llm(codigo, framework)
