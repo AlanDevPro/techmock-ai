@@ -1,20 +1,28 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
+
 
 class RespuestaEvaluacion(BaseModel):
-    pregunta_practica: Optional[str] = Field(
-        default="",
-        description="Enunciado situacional de la prueba técnica solicitando al candidato desarrollar código para su resolución."
+    pregunta_practica: Optional[str] = Field(default="")
+    comprension_a_evaluar: Optional[str] = Field(default="")
+    explicacion_codigo_esperado: Optional[str] = Field(default="")
+    error_por_falta_de_contexto: Optional[str] = Field(default=None)
+
+
+# 🔥 SCHEMA PRO PARA ANÁLISIS DE CÓDIGO
+class RespuestaAnalisisCodigo(BaseModel):
+    calidad_codigo: str = Field(
+        description="Evaluación general del código"
     )
-    comprension_a_evaluar: Optional[str] = Field(
-        default="",
-        description="Aspecto técnico y práctico preciso a validar orgánicamente mediante la resolución enviada por el usuario."
+    errores_detectados: List[str] = Field(
+        default_factory=list,
+        description="Lista de errores detectados"
     )
-    explicacion_codigo_esperado: Optional[str] = Field(
-        default="",
-        description="Explicación argumentativa fusionada con el fragmento de código óptimo o ideal aplicable a la resolución del problema planteado."
+    buenas_practicas: List[str] = Field(
+        default_factory=list,
+        description="Buenas prácticas aplicadas"
     )
-    error_por_falta_de_contexto: Optional[str] = Field(
-        default=None,
-        description="Razonamiento de error provisto estrictamente en caso de carencia de fundamento en el contexto documental."
+    recomendaciones: List[str] = Field(
+        default_factory=list,
+        description="Sugerencias de mejora"
     )

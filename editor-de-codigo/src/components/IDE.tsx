@@ -119,7 +119,7 @@ export default function IDE() {
               onToggle={(event) => setIsQuestionOpen((event.currentTarget as HTMLDetailsElement).open)}
             >
               <summary className="w-full flex items-center justify-between px-4 py-2 text-left text-[12px] font-semibold uppercase tracking-widest cursor-pointer list-none">
-                <span>Preguntas de la prueba</span>
+                <span>Preguntas de la </span>
                 <span className="text-[11px] text-[#8c8c8c]">
                   {selectedFramework ? (selectedFramework === 'vuejs' ? 'Vue.js' : 'Next.js') : 'Sin seleccionar'}
                 </span>
