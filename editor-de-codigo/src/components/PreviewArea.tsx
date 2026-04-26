@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { getWebContainer } from '@/lib/webcontainer';
-import { RotateCw, ExternalLink, Minimize2, Maximize2 } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { getWebContainer } from "@/lib/webcontainer";
+import { RotateCw, ExternalLink, Maximize2, Minimize2 } from "lucide-react";
+import { useTheme } from "./IDE";
 
-export default function PreviewArea({ minified = false, onToggleMinify }: any) {
+export default function PreviewArea({
+  minified = false,
+  onToggleMinify,
+}: {
+  minified?: boolean;
+  onToggleMinify?: () => void;
+}) {
+  const { theme } = useTheme();
   const [url, setUrl] = useState<string | null>(null);
   const [key, setKey] = useState(0);
 
@@ -13,53 +21,122 @@ export default function PreviewArea({ minified = false, onToggleMinify }: any) {
       const container = getWebContainer();
       if (container) {
         clearInterval(checkContainer);
-        container.on('server-ready', (port, appUrl) => {
+        container.on("server-ready", (_port: number, appUrl: string) => {
           setUrl(appUrl);
         });
       }
     }, 1000);
-
     return () => clearInterval(checkContainer);
   }, []);
 
-  const handleRefresh = () => setKey(k => k + 1);
+  const handleRefresh = () => setKey((k) => k + 1);
 
   return (
-    <div className={`flex ${minified ? 'flex-col' : 'flex-col'} h-full w-full bg-[#1e1e1e] border-l border-[#3c3c3c]`}>
-      <div className={`flex ${minified ? 'flex-col py-2' : 'h-9 px-2'} bg-[#252526] items-center justify-between border-b border-[#1e1e1e] shrink-0 text-[#cccccc] transition-all`}>
+    <div
+      className="flex flex-col h-full w-full"
+      style={{ background: "var(--bg-primary)" }}
+    >
+      {/* Header */}
+      <div
+        className="flex h-9 items-center justify-between px-4 shrink-0 border-b text-[12px]"
+        style={{
+          background: "var(--bg-secondary)",
+          color: "var(--text-primary)",
+          borderColor: "var(--border)",
+        }}
+      >
         {!minified && (
-          <div className="flex items-center text-[12px] px-2 font-semibold">
-             Live Preview
-          </div>
+          <span className="font-semibold uppercase tracking-wider">
+            Live Preview
+          </span>
         )}
-        <div className={`flex items-center gap-1 ${minified ? 'flex-col' : ''}`}>
-           {!minified && (
-             <>
-               <button onClick={handleRefresh} className="p-1 hover:bg-[#3c3c3c] rounded" title="Recargar">
-                 <RotateCw size={14} />
-               </button>
-               {url && (
-                 <a href={url} target="_blank" rel="noopener noreferrer" className="p-1 hover:bg-[#3c3c3c] rounded flex items-center" title="Abrir en pestaña">
-                   <ExternalLink size={14} />
-                 </a>
-               )}
-             </>
-           )}
-           <button onClick={onToggleMinify} className="p-1 hover:bg-[#3c3c3c] rounded" title={minified ? "Expandir" : "Minimizar"}>
-             {minified ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
-           </button>
+        <div className="flex items-center gap-1 ml-auto">
+          {!minified && (
+            <>
+              <button
+                onClick={handleRefresh}
+                className="p-1.5 rounded transition-colors hover:opacity-70"
+                style={{ color: "var(--text-secondary)" }}
+                title="Recargar"
+              >
+                <RotateCw size={13} />
+              </button>
+              {url && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 rounded flex items-center transition-colors hover:opacity-70"
+                  style={{ color: "var(--text-secondary)" }}
+                  title="Abrir en nueva pestaña"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </>
+          )}
+          {onToggleMinify && (
+            <button
+              onClick={onToggleMinify}
+              className="p-1.5 rounded transition-colors hover:opacity-70"
+              style={{ color: "var(--text-secondary)" }}
+              title={minified ? "Expandir" : "Minimizar"}
+            >
+              {minified ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
+            </button>
+          )}
         </div>
       </div>
-      <div className={`flex-1 w-full bg-white relative ${minified ? 'hidden' : 'block'}`}>
+
+      {/* Preview content */}
+      <div
+        className={`flex-1 w-full relative ${minified ? "hidden" : "block"}`}
+        style={{ background: theme === "light" ? "#ffffff" : "#1e1e1e" }}
+      >
         {!url ? (
-          <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-[#858585] bg-[#1e1e1e]">
+          <div
+            className="absolute inset-0 flex items-center justify-center p-6 text-center"
+            style={{
+              background: "var(--bg-primary)",
+              color: "var(--text-secondary)",
+            }}
+          >
             <div>
-              <p className="mb-2 text-lg">Modo Servidor no iniciado</p>
-              <p className="text-sm">Escribe <code className="bg-[#3c3c3c] px-1 py-0.5 rounded text-white">npm install</code> y <code className="bg-[#3c3c3c] px-1 py-0.5 rounded text-white">npm run dev</code> en la consola para iniciar la vista previa.</p>
+              <p className="mb-3 text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
+                Drag a view here to display.
+              </p>
+              <p className="text-sm">
+                Escribe{" "}
+                <code
+                  className="px-1 py-0.5 rounded text-[12px]"
+                  style={{
+                    background: "var(--bg-tertiary)",
+                    color: "var(--accent)",
+                  }}
+                >
+                  npm install
+                </code>{" "}
+                y{" "}
+                <code
+                  className="px-1 py-0.5 rounded text-[12px]"
+                  style={{
+                    background: "var(--bg-tertiary)",
+                    color: "var(--accent)",
+                  }}
+                >
+                  npm run dev
+                </code>{" "}
+                en la terminal para iniciar la vista previa.
+              </p>
             </div>
           </div>
         ) : (
-          <iframe key={key} src={url} className="w-full h-full border-none" />
+          <iframe
+            key={key}
+            src={url}
+            className="w-full h-full border-none"
+            style={{ background: "#ffffff" }}
+          />
         )}
       </div>
     </div>
