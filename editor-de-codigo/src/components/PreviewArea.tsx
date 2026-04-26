@@ -2,15 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { getWebContainer } from "@/lib/webcontainer";
-import { RotateCw, ExternalLink, Maximize2, Minimize2 } from "lucide-react";
+import { RotateCw, ExternalLink, Maximize2, Minimize2, Eye, EyeOff } from "lucide-react";
 import { useTheme } from "./IDE";
 
 export default function PreviewArea({
   minified = false,
   onToggleMinify,
+  isVisible = true,
+  onToggleVisibility,
 }: {
   minified?: boolean;
   onToggleMinify?: () => void;
+  isVisible?: boolean;
+  onToggleVisibility?: () => void;
 }) {
   const { theme } = useTheme();
   const [url, setUrl] = useState<string | null>(null);
@@ -30,6 +34,10 @@ export default function PreviewArea({
   }, []);
 
   const handleRefresh = () => setKey((k) => k + 1);
+
+  if (!isVisible) {
+    return null;
+  }
 
   return (
     <div
@@ -74,6 +82,16 @@ export default function PreviewArea({
                 </a>
               )}
             </>
+          )}
+          {onToggleVisibility && (
+            <button
+              onClick={onToggleVisibility}
+              className="p-1.5 rounded transition-colors hover:opacity-70"
+              style={{ color: "var(--text-secondary)" }}
+              title={isVisible ? "Ocultar preview" : "Mostrar preview"}
+            >
+              {isVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
           )}
           {onToggleMinify && (
             <button

@@ -5,17 +5,26 @@ import { Terminal } from "xterm";
 import { FitAddon } from "xterm-addon-fit";
 import { getWebContainer } from "@/lib/webcontainer";
 import { useTheme } from "./IDE";
+import type { WebContainerProcess } from "@webcontainer/api";
 import "xterm/css/xterm.css";
 
-export default function TerminalArea({ isBooting }: { isBooting: boolean }) {
+export default function TerminalArea({ 
+  isBooting,
+  onReady 
+}: { 
+  isBooting: boolean;
+  onReady?: () => void;
+}) {
   const { theme } = useTheme();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const isTerminalReadyRef = useRef(false);
+
+
 
   useEffect(() => {
-    if (isBooting || !terminalRef.current || isTerminalReady) return;
+    if (isBooting || !terminalRef.current || isTerminalReadyRef.current) return;
 
     if (!xtermRef.current) {
       xtermRef.current = new Terminal({
@@ -44,10 +53,10 @@ export default function TerminalArea({ isBooting }: { isBooting: boolean }) {
       xtermRef.current.loadAddon(fitAddonRef.current);
       xtermRef.current.open(terminalRef.current);
       fitAddonRef.current.fit();
-      setIsTerminalReady(true);
+      isTerminalReadyRef.current = true;
     }
 
-    let shellProcess: any;
+    let shellProcess: WebContainerProcess;
     let inputWriter: WritableStreamDefaultWriter<string>;
 
     const initTerminal = async () => {
@@ -86,7 +95,7 @@ export default function TerminalArea({ isBooting }: { isBooting: boolean }) {
     const handleResize = () => fitAddonRef.current?.fit();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [isBooting, isTerminalReady]);
+  }, [isBooting, theme]);
 
   return <div className="w-full h-full" ref={terminalRef} />;
 }

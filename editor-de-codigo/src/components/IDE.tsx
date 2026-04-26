@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
-import ActivityBar from "./ActivityBar";
+import ActivityBar, { ActivityView } from "./ActivityBar";
 import LeftPanel from "./LeftPanel";
 import Sidebar from "./Sidebar";
 import EditorArea from "./EditorArea";
@@ -28,19 +28,38 @@ export default function IDE() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBootingUi, setIsBootingUi] = useState(true);
   const [selectedFramework, setSelectedFramework] = useState<"vuejs" | "nextjs" | null>(null);
-  const [questionData, setQuestionData] = useState<{
-    pregunta_practica: string;
-    comprension_a_evaluar: string;
-    explicacion_codigo_esperado: string;
-    error_por_falta_de_contexto?: string | null;
-  } | null>(null);
-  const [isQuestionOpen, setIsQuestionOpen] = useState(true);
-  const [isQuestionLoading, setIsQuestionLoading] = useState(false);
-  const [questionError, setQuestionError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ActivityView>("explorer");
   const [submitStatus, setSubmitStatus] = useState<null | "running" | "success" | "error">(null);
+  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [previewWidth, setPreviewWidth] = useState(400);
+  const [isResizingPreview, setIsResizingPreview] = useState(false);
+  
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  
+  // Estados para la Terminal
+  const [isTerminalVisible, setIsTerminalVisible] = useState(true);
+  const [terminalHeight, setTerminalHeight] = useState(256); // Altura inicial de 256px (h-64)
+  const [isResizingTerminal, setIsResizingTerminal] = useState(false);
+  const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
+  
   const hasLoadedQuestionsRef = useRef(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
   const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const togglePreviewVisibility = () => setIsPreviewVisible(!isPreviewVisible);
+  const toggleSidebarVisibility = () => setIsSidebarVisible(!isSidebarVisible);
+  const toggleTerminalVisibility = () => setIsTerminalVisible(!isTerminalVisible);
+
+  // Función para manejar el cambio de vista en ActivityBar
+  const handleViewChange = (view: ActivityView) => {
+    setActiveView(view);
+    // Si el sidebar está oculto, lo mostramos automáticamente
+    if (!isSidebarVisible) {
+      setIsSidebarVisible(true);
+    }
+  };
 
   const cssVars: Record<string, string> =
     theme === "dark"
@@ -108,9 +127,128 @@ export default function IDE() {
     if (framework === "vuejs" || framework === "nextjs") {
       hasLoadedQuestionsRef.current = true;
       setSelectedFramework(framework);
-      loadQuestions(framework);
     }
   }, []);
+
+  // Manejar el redimensionamiento del preview (lado derecho)
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingPreview) return;
+      
+      const newWidth = window.innerWidth - e.clientX;
+      const minWidth = 200;
+      const maxWidth = window.innerWidth * 0.7;
+      const clampedWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+      setPreviewWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingPreview(false);
+    };
+
+    if (isResizingPreview) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingPreview]);
+
+  // Manejar el redimensionamiento del sidebar (lado izquierdo) - sin límite mínimo
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSidebar) return;
+      
+      const newWidth = e.clientX;
+      const maxWidth = 500;
+      const newWidthValue = newWidth;
+      
+      // Si el ancho es menor a 10px, consideramos que se quiere ocultar
+      if (newWidthValue < 10) {
+        setIsSidebarVisible(false);
+        setIsResizingSidebar(false);
+        return;
+      }
+      
+      const clampedWidth = Math.min(newWidthValue, maxWidth);
+      setSidebarWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
+    };
+
+    if (isResizingSidebar) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingSidebar]);
+
+  // Manejar el redimensionamiento de la terminal (vertical)
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingTerminal) return;
+      
+      const windowHeight = window.innerHeight;
+      const mouseY = e.clientY;
+      const maxHeight = windowHeight * 0.7;
+      const minHeight = 50;
+      
+      // Calcular la nueva altura desde la parte inferior
+      const newHeight = windowHeight - mouseY;
+      
+      // Si la altura es menor a 30px, ocultar la terminal
+      if (newHeight < 30) {
+        setIsTerminalVisible(false);
+        setIsResizingTerminal(false);
+        return;
+      }
+      
+      const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
+      setTerminalHeight(clampedHeight);
+      
+      // Forzar el reajuste del terminal después de cambiar el tamaño
+      setTimeout(() => {
+        if (terminalAreaRef.current?.fitTerminal) {
+          terminalAreaRef.current.fitTerminal();
+        }
+      }, 50);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingTerminal(false);
+    };
+
+    if (isResizingTerminal) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingTerminal]);
 
   const handleRefreshFs = async () => {
     if (isRefreshing) return;
@@ -120,20 +258,10 @@ export default function IDE() {
     setIsRefreshing(false);
   };
 
-  const loadQuestions = async (framework: "vuejs" | "nextjs") => {
-    const endpoint = framework === "vuejs" ? "vue" : "next";
-    setIsQuestionLoading(true);
-    setQuestionError(null);
-    try {
-      const response = await fetch(`http://127.0.0.1:8000/api/generar-preguntas/${endpoint}`);
-      if (!response.ok) throw new Error("No se pudo obtener las preguntas");
-      const data = await response.json();
-      setQuestionData(data);
-    } catch (error) {
-      setQuestionData(null);
-      setQuestionError("No se pudieron cargar las preguntas. Verifica la API RAG.");
-    } finally {
-      setIsQuestionLoading(false);
+  const handleSelectFileWithLine = (file: string, line?: number) => {
+    setActiveFile(file);
+    if (line) {
+      console.log(`Navegar a línea ${line} en el archivo ${file}`);
     }
   };
 
@@ -144,20 +272,15 @@ export default function IDE() {
     setTimeout(() => setSubmitStatus(null), 3000);
   };
 
-  // ─── Submit Code: recopila fileSystem, llama al endpoint y redirige ──────────
   const handleSubmitCode = async () => {
     console.log("🚀 Iniciando handleSubmitCode...");
     
     setSubmitStatus("running");
 
-    // 📍 LOG: Información del archivo activo
     console.log("📁 activeFile:", activeFile);
-    
-    // 📍 LOG: Todos los archivos disponibles en fileSystem
     console.log("📂 fileSystem keys:", Object.keys(fileSystem));
     console.log("📊 Total de archivos en fileSystem:", Object.keys(fileSystem).length);
     
-    // 📍 LOG: Verificar si el archivo activo existe
     if (!fileSystem[activeFile]) {
       console.error("❌ El archivo activo no existe en fileSystem:", activeFile);
       console.log("📂 Archivos disponibles:", Object.keys(fileSystem));
@@ -166,28 +289,17 @@ export default function IDE() {
       return;
     }
 
-    // 📍 LOG: Contenido del archivo activo
     const codigoCompleto = fileSystem[activeFile];
     console.log("📄 contenido del archivo activo:");
     console.log("📏 Longitud del código:", codigoCompleto?.length || 0, "caracteres");
-    console.log("📝 Primeros 500 caracteres del código:");
-    console.log(codigoCompleto?.substring(0, 500));
-    console.log("📝 Últimos 200 caracteres del código:");
-    console.log(codigoCompleto?.substring(Math.max(0, codigoCompleto.length - 200)));
     
-    // 🔍 VALIDACIÓN: Verificar si hay código para enviar
     if (!codigoCompleto || codigoCompleto.trim().length === 0) {
       console.error("❌ No hay código válido para enviar");
-      console.log("📄 codigoCompleto está:", codigoCompleto ? "presente" : "ausente");
-      if (codigoCompleto) {
-        console.log("📄 codigoCompleto.trim().length:", codigoCompleto.trim().length);
-      }
       setSubmitStatus("error");
       setTimeout(() => setSubmitStatus(null), 3000);
       return;
     }
 
-    // Determinar el framework para enviarlo al endpoint
     const frameworkApi =
       selectedFramework === "vuejs"
         ? "vue"
@@ -195,11 +307,9 @@ export default function IDE() {
         ? "next"
         : "react";
 
-    // 📍 LOG: Framework seleccionado
     console.log("🎯 Framework seleccionado:", selectedFramework);
     console.log("🔧 frameworkApi para el endpoint:", frameworkApi);
     
-    // 📍 LOG: Construcción del objeto a enviar
     const payload = {
       codigo: codigoCompleto,
       framework: frameworkApi,
@@ -208,11 +318,6 @@ export default function IDE() {
     console.log("📦 Payload completo a enviar:");
     console.log("   - framework:", payload.framework);
     console.log("   - codigo length:", payload.codigo.length, "caracteres");
-    console.log("   - codigo preview (primeros 200 chars):", payload.codigo.substring(0, 200));
-    
-    // 📍 LOG: Información adicional útil para debug
-    console.log("🌐 URL del endpoint:", "http://127.0.0.1:8000/api/analizar-codigo");
-    console.log("📋 Headers:", { "Content-Type": "application/json" });
     
     try {
       console.log("✈️ Enviando petición POST al backend...");
@@ -225,7 +330,6 @@ export default function IDE() {
 
       console.log("📡 Respuesta recibida del backend:");
       console.log("   - Status:", response.status);
-      console.log("   - Status Text:", response.statusText);
       console.log("   - OK:", response.ok);
 
       if (!response.ok) {
@@ -236,25 +340,18 @@ export default function IDE() {
 
       const resultado = await response.json();
       console.log("✅ Resultado recibido del backend:");
-      console.log("   - Estructura completa:", resultado);
       console.log("   - Claves del resultado:", Object.keys(resultado));
 
-      // 3. Guardar el resultado en sessionStorage para que /analisis lo lea
       sessionStorage.setItem("analisis_resultado", JSON.stringify(resultado));
       console.log("💾 Resultado guardado en sessionStorage con clave 'analisis_resultado'");
 
       setSubmitStatus("success");
       console.log("✅ Submit completado con éxito, redirigiendo a /analisis...");
 
-      // 4. Redirigir a la página de análisis
       window.location.href = "http://localhost:3000/analisis";
       
     } catch (error) {
       console.error("❌ Error al analizar código:", error);
-      console.error("Detalles del error:", {
-        message: error instanceof Error ? error.message : "Error desconocido",
-        stack: error instanceof Error ? error.stack : undefined,
-      });
       setSubmitStatus("error");
       setTimeout(() => setSubmitStatus(null), 3000);
     }
@@ -304,153 +401,219 @@ export default function IDE() {
           </div>
           <div className="flex items-center gap-2">
             <span
-              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors"
-              style={{ borderColor: "var(--accent)", color: "var(--accent)" }}
+              onClick={toggleSidebarVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{ 
+                borderColor: "var(--accent)", 
+                backgroundColor: isSidebarVisible ? "var(--accent)" : "transparent",
+                color: isSidebarVisible ? "#ffffff" : "var(--accent)"
+              }}
             >
-              Preview
+              {isSidebarVisible ? "Sidebar ✓" : "Sidebar"}
+            </span>
+            <span
+              onClick={togglePreviewVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{ 
+                borderColor: "var(--accent)", 
+                backgroundColor: isPreviewVisible ? "var(--accent)" : "transparent",
+                color: isPreviewVisible ? "#ffffff" : "var(--accent)"
+              }}
+            >
+              {isPreviewVisible ? "Preview ✓" : "Preview"}
+            </span>
+            <span
+              onClick={toggleTerminalVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{ 
+                borderColor: "var(--accent)", 
+                backgroundColor: isTerminalVisible ? "var(--accent)" : "transparent",
+                color: isTerminalVisible ? "#ffffff" : "var(--accent)"
+              }}
+            >
+              {isTerminalVisible ? "Terminal ✓" : "Terminal"}
             </span>
           </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 22px - 36px - 28px)" }}>
           <LeftPanel />
-          <ActivityBar />
-          <Sidebar
-            activeFile={activeFile}
-            onSelectFile={setActiveFile}
-            files={fileSystem}
-            onRefresh={handleRefreshFs}
-          />
+          <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
+          
+          {/* Sidebar con su handle de redimensionamiento */}
+          {isSidebarVisible && (
+            <>
+              <Sidebar
+                activeView={activeView}
+                activeFile={activeFile}
+                onSelectFile={handleSelectFileWithLine}
+                files={fileSystem}
+                onRefresh={handleRefreshFs}
+                selectedFramework={selectedFramework}
+                isQuestionOpen={false}
+                onToggleOpen={() => {}}
+                isVisible={isSidebarVisible}
+                width={sidebarWidth}
+              />
+              <div
+                className="cursor-ew-resize hover:bg-accent transition-colors"
+                style={{ 
+                  background: isResizingSidebar ? "var(--accent)" : "transparent",
+                  width: "3px",
+                  flexShrink: 0
+                }}
+                onMouseDown={() => setIsResizingSidebar(true)}
+              />
+            </>
+          )}
 
           <div className="flex flex-col flex-1 h-full min-w-0">
-            {/* Question panel */}
-            <div
-              className="border-b shrink-0"
-              style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", borderColor: "var(--border)" }}
-            >
-              <details
-                open={isQuestionOpen}
-                onToggle={(e) => setIsQuestionOpen((e.currentTarget as HTMLDetailsElement).open)}
-              >
-                <summary className="w-full flex items-center justify-between px-4 py-2 text-left text-[12px] font-semibold uppercase tracking-widest cursor-pointer list-none">
-                  <span>Preguntas de la prueba</span>
-                  <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                    {selectedFramework ? (selectedFramework === "vuejs" ? "Vue.js" : "Next.js") : "Sin seleccionar"}
-                  </span>
-                </summary>
-                <div className="px-4 pb-3 text-[12px] max-h-56 overflow-auto" style={{ color: "var(--text-secondary)" }}>
-                  {isQuestionLoading && <p>Cargando preguntas...</p>}
-                  {questionError && (
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <p className="text-red-400">{questionError}</p>
-                      {selectedFramework && (
-                        <button onClick={() => loadQuestions(selectedFramework)} className="text-[11px] hover:opacity-80" style={{ color: "var(--text-secondary)" }}>
-                          Reintentar
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {!isQuestionLoading && !questionError && !questionData && (
-                    <p>Selecciona Vue.js o Next.js para cargar la pregunta técnica.</p>
-                  )}
-                  {!isQuestionLoading && !questionError && questionData && (
-                    <div className="space-y-2">
-                      <p className="text-[13px] font-semibold" style={{ color: "var(--text-heading)" }}>
-                        {questionData.pregunta_practica}
-                      </p>
-                      <p>{questionData.comprension_a_evaluar}</p>
-                      <p className="whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>
-                        {questionData.explicacion_codigo_esperado}
-                      </p>
-                      {questionData.error_por_falta_de_contexto && (
-                        <p className="text-yellow-400">{questionData.error_por_falta_de_contexto}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </details>
-            </div>
-
             {/* Editor + Preview */}
-            <div className="flex-1 min-h-0 relative flex flex-row" style={{ background: "var(--bg-primary)" }}>
+            <div 
+              className="flex-1 min-h-0 relative flex flex-row" 
+              style={{ 
+                background: "var(--bg-primary)",
+                height: isTerminalVisible ? `calc(100% - ${terminalHeight}px)` : '100%',
+                transition: isResizingTerminal ? 'none' : 'height 0.2s ease'
+              }}
+            >
               {isBooting ? (
                 <div className="flex items-center justify-center h-full w-full" style={{ color: "var(--text-secondary)" }}>
                   Arrancando micro-sistema operativo en la web...
                 </div>
               ) : (
                 <>
-                  <div className="flex-1 min-w-0 h-full">
+                  <div 
+                    className="flex-1 min-w-0 h-full"
+                    style={{ 
+                      width: isPreviewVisible ? `calc(100% - ${previewWidth}px)` : '100%',
+                      transition: isResizingPreview ? 'none' : 'width 0.2s ease'
+                    }}
+                  >
                     <EditorArea activeFile={activeFile} fileSystem={fileSystem} />
                   </div>
-                  <div
-                    className="w-1/3 min-w-[300px] h-full hidden md:flex flex-col"
-                    style={{ borderLeft: "1px solid var(--border)" }}
-                  >
+                  
+                  {/* Resize handle - solo visible cuando preview está visible */}
+                  {isPreviewVisible && (
                     <div
-                      className="h-9 flex items-center justify-between px-4 shrink-0 border-b text-[12px] font-semibold uppercase tracking-wider"
-                      style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", borderColor: "var(--border)" }}
+                      className="cursor-ew-resize hover:bg-accent transition-colors"
+                      style={{ 
+                        background: isResizingPreview ? "var(--accent)" : "transparent",
+                        width: "3px",
+                        flexShrink: 0
+                      }}
+                      onMouseDown={() => setIsResizingPreview(true)}
+                    />
+                  )}
+                  
+                  {/* Preview Area con ancho dinámico */}
+                  {isPreviewVisible && (
+                    <div
+                      className="h-full flex flex-col"
+                      style={{ 
+                        width: `${previewWidth}px`,
+                        minWidth: "200px",
+                        maxWidth: "70vw",
+                        transition: isResizingPreview ? 'none' : 'width 0.2s ease'
+                      }}
                     >
-                      <span>Output</span>
-                      <div className="flex gap-1">
-                        <button className="p-1 hover:opacity-70 rounded" title="Maximizar" style={{ color: "var(--text-secondary)" }}>⛶</button>
-                        <button className="p-1 hover:opacity-70 rounded" title="Cerrar" style={{ color: "var(--text-secondary)" }}>✕</button>
-                      </div>
+                      <PreviewArea 
+                        isVisible={isPreviewVisible}
+                        onToggleVisibility={togglePreviewVisibility}
+                      />
                     </div>
-                    <PreviewArea />
-                  </div>
+                  )}
                 </>
               )}
             </div>
 
-            {/* Terminal */}
-            <div className="h-64 border-t flex flex-col shrink-0" style={{ background: "var(--bg-primary)", borderColor: "var(--border)" }}>
-              <div className="flex h-9 border-b items-center px-4" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
-                <span
-                  className="text-[11px] font-semibold uppercase cursor-pointer border-b h-full flex items-center mb-[-1px]"
-                  style={{ color: "var(--text-primary)", borderColor: "var(--accent)" }}
+            {/* Handle de redimensionamiento vertical de la terminal */}
+            {isTerminalVisible && (
+              <div
+                className="cursor-ns-resize hover:bg-accent transition-colors"
+                style={{ 
+                  background: isResizingTerminal ? "var(--accent)" : "transparent",
+                  height: "3px",
+                  flexShrink: 0
+                }}
+                onMouseDown={() => setIsResizingTerminal(true)}
+              />
+            )}
+
+            {/* Terminal con altura dinámica */}
+            {isTerminalVisible && (
+              <div 
+                className="border-t flex flex-col shrink-0"
+                style={{ 
+                  height: `${terminalHeight}px`,
+                  minHeight: "50px",
+                  maxHeight: "70vh",
+                  background: "var(--bg-primary)",
+                  borderColor: "var(--border)",
+                  transition: isResizingTerminal ? 'none' : 'height 0.2s ease'
+                }}
+              >
+                <div className="flex h-9 border-b items-center px-4" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
+                  <span
+                    onClick={toggleTerminalVisibility}
+                    className="text-[11px] font-semibold uppercase cursor-pointer border-b h-full flex items-center mb-[-1px] hover:opacity-80 transition-opacity"
+                    style={{ color: "var(--text-primary)", borderColor: "var(--accent)" }}
+                  >
+                    Terminal
+                  </span>
+                </div>
+                <div className="flex-1 relative overflow-hidden" style={{ background: "var(--bg-primary)" }}>
+                  <TerminalArea 
+                    isBooting={isBooting}
+                    onReady={() => {
+                      // Forzar el fit del terminal cuando esté listo
+                      setTimeout(() => {
+                        if (terminalAreaRef.current?.fitTerminal) {
+                          terminalAreaRef.current.fitTerminal();
+                        }
+                      }, 100);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Action bar (si la terminal está oculta, mostramos la barra de acciones abajo) */}
+            {!isTerminalVisible && (
+              <div
+                className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
+                style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+              >
+                {submitStatus === "running" && (
+                  <span className="text-[12px] animate-pulse" style={{ color: "var(--text-secondary)" }}>
+                    Analizando código...
+                  </span>
+                )}
+                {submitStatus === "success" && (
+                  <span className="text-[12px] text-green-400 font-semibold">✓ Completado</span>
+                )}
+                {submitStatus === "error" && (
+                  <span className="text-[12px] text-red-400 font-semibold">✗ Error al analizar</span>
+                )}
+
+                <button
+                  onClick={handleRunTests}
+                  disabled={submitStatus === "running"}
+                  className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ background: "var(--btn-run-bg)" }}
                 >
-                  Terminal
-                </span>
+                  Run Tests
+                </button>
+                <button
+                  onClick={handleSubmitCode}
+                  disabled={submitStatus === "running"}
+                  className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ background: "var(--btn-submit-bg)" }}
+                >
+                  Submit Code
+                </button>
               </div>
-              <div className="flex-1 relative overflow-hidden p-2" style={{ background: "var(--bg-primary)" }}>
-                <TerminalArea isBooting={isBooting} />
-              </div>
-            </div>
-
-            {/* Action bar */}
-            <div
-              className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
-              style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
-            >
-              {submitStatus === "running" && (
-                <span className="text-[12px] animate-pulse" style={{ color: "var(--text-secondary)" }}>
-                  Analizando código...
-                </span>
-              )}
-              {submitStatus === "success" && (
-                <span className="text-[12px] text-green-400 font-semibold">✓ Completado</span>
-              )}
-              {submitStatus === "error" && (
-                <span className="text-[12px] text-red-400 font-semibold">✗ Error al analizar</span>
-              )}
-
-              <button
-                onClick={handleRunTests}
-                disabled={submitStatus === "running"}
-                className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                style={{ background: "var(--btn-run-bg)" }}
-              >
-                Run Tests
-              </button>
-              <button
-                onClick={handleSubmitCode}
-                disabled={submitStatus === "running"}
-                className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                style={{ background: "var(--btn-submit-bg)" }}
-              >
-                Submit Code
-              </button>
-            </div>
+            )}
           </div>
         </div>
 

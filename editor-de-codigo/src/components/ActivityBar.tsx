@@ -6,34 +6,40 @@ import {
   Search,
   Settings,
   BookOpen,
+  type LucideIcon,
 } from "lucide-react";
 
+export type ActivityView = "problem" | "explorer" | "search" | "settings";
+
 const navItems = [
-  { icon: BookOpen,      label: "Problem",     id: "problem" },
-  { icon: Files,         label: "Explorer",    id: "explorer" },
-  { icon: Search,        label: "Search",      id: "search" },
+  { icon: BookOpen, label: "Problem", id: "problem" as const },
+  { icon: Files, label: "Explorer", id: "explorer" as const },
+  { icon: Search, label: "Search", id: "search" as const },
 ];
 
 const bottomItems = [
-  { icon: Settings,      label: "Settings",    id: "settings" },
+  { icon: Settings, label: "Settings", id: "settings" as const },
 ];
 
-export default function ActivityBar() {
-  const [active, setActive] = useState("explorer");
+interface ActivityBarProps {
+  activeView: ActivityView;
+  onViewChange: (view: ActivityView) => void;
+}
 
+export default function ActivityBar({ activeView, onViewChange }: ActivityBarProps) {
   const Item = ({
     icon: Icon,
     label,
     id,
   }: {
-    icon: any;
+    icon: LucideIcon;
     label: string;
-    id: string;
+    id: ActivityView;
   }) => {
-    const isActive = active === id;
+    const isActive = activeView === id;
     return (
       <button
-        onClick={() => setActive(id)}
+        onClick={() => onViewChange(id)}
         title={label}
         className="relative w-full flex flex-col items-center justify-center py-3 gap-1 transition-all group"
         style={{
