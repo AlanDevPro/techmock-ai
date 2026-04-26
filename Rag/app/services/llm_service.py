@@ -1,15 +1,28 @@
+print("🔥 1 - inicio archivo")
+
 import json
 import re
+
+print("🔥 2 - json/re OK")
+
 from langchain_community.chat_models import ChatOllama
+print("🔥 3 - ChatOllama importado")
+
 from langchain_core.messages import SystemMessage, HumanMessage
+print("🔥 4 - messages importado")
+
 from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
 from app.core.prompts import get_junior_prompt
+
+print("🔥 5 - imports completos")
+
 
 
 # -----------------------------
 # 🔹 GENERAR PREGUNTAS
 # -----------------------------
 async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
+    print("🔥 6 - dentro de generar_evaluacion_llm")
 
     llm = ChatOllama(
         model="qwen2.5-coder:1.5b",
@@ -18,6 +31,7 @@ async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
         num_predict=500,
         num_ctx=1536
     )
+    print("🔥 7 - ChatOllama creado en generar_evaluacion_llm")
 
     esquema = """
 {
@@ -44,9 +58,11 @@ Formato obligatorio:
         SystemMessage(content=prompt_completo),
         HumanMessage(content=f"Contexto técnico:\n{contexto[:1500]}")
     ]
+    print("🔥 8 - messages preparados, antes de llm.ainvoke")
 
     try:
         respuesta = await llm.ainvoke(messages)
+        print("🔥 9 - llm.ainvoke completado")
         data = _safe_json_load(respuesta.content)
 
         return {
@@ -70,7 +86,7 @@ Formato obligatorio:
 # 🔥 ANALIZAR CÓDIGO (PRO FEEDBACK)
 # -----------------------------
 async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
-
+    print("🔥 10 - dentro de analizar_codigo_llm")
     print("⚡ Iniciando análisis profesional de código...")
 
     llm = ChatOllama(
@@ -80,6 +96,7 @@ async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
         num_predict=800,
         num_ctx=2048
     )
+    print("🔥 11 - ChatOllama creado en analizar_codigo_llm")
 
     esquema = """
 {
@@ -156,9 +173,11 @@ Formato obligatorio:
         SystemMessage(content=prompt),
         HumanMessage(content=f"Analiza este código {framework}:\n\n{codigo_recortado}")
     ]
+    print("🔥 12 - messages preparados en analizar_codigo_llm, antes de llm.ainvoke")
 
     try:
         respuesta = await llm.ainvoke(messages)
+        print("🔥 13 - llm.ainvoke completado en analizar_codigo_llm")
 
         print("🧠 RAW LLM:", respuesta.content[:300])
 
@@ -177,6 +196,7 @@ Formato obligatorio:
 
 def _construir_respuesta_analisis(data: dict) -> dict:
     """Construye y normaliza la respuesta completa del análisis pro."""
+    print("🔥 14 - dentro de _construir_respuesta_analisis")
 
     cal = data.get("calificacion_general", {})
 
@@ -196,6 +216,7 @@ def _construir_respuesta_analisis(data: dict) -> dict:
 
 def _respuesta_error_analisis(error: str) -> dict:
     """Respuesta de fallback cuando hay un error interno."""
+    print("🔥 15 - dentro de _respuesta_error_analisis")
     return {
         "calificacion_general": {
             "nivel": "Crítico",

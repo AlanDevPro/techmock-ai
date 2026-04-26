@@ -134,30 +134,27 @@ export default function SubmissionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Nuevo useEffect: solo lee de sessionStorage
   useEffect(() => {
-    const fetchAnalysis = async () => {
-      try {
-        const res = await fetch("http://127.0.0.1:8000/api/analizar-codigo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ codigo: "", framework: "react" }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json: AnalysisResult = await res.json();
-        setData(json);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Error desconocido");
-      } finally {
-        setLoading(false);
+    try {
+      const stored = sessionStorage.getItem("analisis_resultado");
+
+      if (!stored) {
+        throw new Error("No hay resultado en sessionStorage");
       }
-    };
-    fetchAnalysis();
+
+      const json: AnalysisResult = JSON.parse(stored);
+      setData(json);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  // Función para volver al dashboard correctamente
-  const goToDashboard = () => {
-    // Usar window.location para navegar a la URL específica
-    window.location.href = "http://localhost:3000/dashboard";
+  // Función para volver al IDE (puerto 3001)
+  const goToIDE = () => {
+    window.location.href = "http://localhost:3001/";
   };
 
   const nivel = data?.calificacion_general.nivel ?? "";
@@ -173,21 +170,34 @@ export default function SubmissionsPage() {
           <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-cyan-400 animate-spin"
             style={{ animationDirection: "reverse", animationDuration: "0.7s" }} />
         </div>
-        <p className="text-sm text-slate-400 tracking-widest animate-pulse">ANALIZANDO CÓDIGO…</p>
+        <p className="text-sm text-slate-400 tracking-widest animate-pulse">CARGANDO RESULTADOS…</p>
       </div>
     );
   }
 
-  // ── Error ──
+  // ── Error / Sin análisis ──
   if (error || !data) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4"
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4"
         style={{ background: "#0a0f1a" }}>
-        <ShieldAlert size={40} color="#ef4444" />
-        <p className="text-red-400 text-sm">{error ?? "No se pudo cargar el análisis."}</p>
-        <button onClick={goToDashboard}
-          className="mt-2 px-4 py-2 rounded text-xs border border-slate-700 text-slate-300 hover:border-blue-500 transition-colors">
-          ← Volver al Dashboard
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Code2 size={48} color="#f59e0b" strokeWidth={1.5} />
+          <h2 className="text-xl font-bold text-amber-500 tracking-tight">
+            ¡Aún no hay análisis!
+          </h2>
+          <p className="text-sm text-slate-400 max-w-md">
+            Para ver los resultados, primero debes enviar un código para analizar desde el IDE.
+          </p>
+          <div className="mt-4 p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 max-w-md">
+            <p className="text-xs text-slate-400 leading-relaxed">
+              💡 <span className="text-amber-400">Consejo:</span> Vuelve al IDE, escribe o pega tu código React, 
+              haz clic en &quot;Analizar&quot; y luego visita esta página para ver los resultados detallados.
+            </p>
+          </div>
+        </div>
+        <button onClick={goToIDE}
+          className="mt-4 px-6 py-2.5 rounded-lg text-sm font-medium border border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400 transition-all flex items-center gap-2">
+          <ArrowLeft size={16} /> Volver al IDE
         </button>
       </div>
     );
@@ -201,9 +211,9 @@ export default function SubmissionsPage() {
       {/* Top bar */}
       <div className="sticky top-0 z-20 flex items-center gap-3 px-6 py-3 border-b"
         style={{ background: "#0d1525cc", borderColor: "#1e293b", backdropFilter: "blur(12px)" }}>
-        <button onClick={goToDashboard}
+        <button onClick={goToIDE}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors">
-          <ArrowLeft size={14} /> Volver al Dashboard
+          <ArrowLeft size={14} /> Volver al IDE
         </button>
         <span className="text-slate-700">|</span>
         <Code2 size={14} className="text-blue-400" />
@@ -262,7 +272,7 @@ export default function SubmissionsPage() {
               {data.errores.map((err, i) => (
                 <div key={i} className="flex gap-3 p-4 rounded-xl border"
                   style={{ background: "#0d1525", borderColor: impactoColor[err.impacto] + "44" }}>
-                  <AlertTriangle size={15} className="flex-shrink-0" style={{ color: impactoColor[err.impacto], marginTop: 1 }} />
+                  <AlertTriangle size={15} style={{ color: impactoColor[err.impacto], flexShrink: 0, marginTop: 1 }} />
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-bold text-white">{err.tipo}</span>
