@@ -1,45 +1,90 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
-import { updateFile } from '@/lib/webcontainer';
+import { useState, useEffect } from "react";
+import Editor from "@monaco-editor/react";
+import { updateFile } from "@/lib/webcontainer";
+import { useTheme } from "./IDE";
+import {
+  X,
+  LayoutPanelLeft,
+  MoreHorizontal,
+  FileCode,
+  FileJson,
+  FileType2,
+  FileBox,
+} from "lucide-react";
 
 interface EditorAreaProps {
   activeFile: string;
   fileSystem: { [key: string]: string };
+  onCursorChange?: (line: number, column: number) => void;
 }
 
-export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) {
-  const [content, setContent] = useState('');
-  
+const getFileIcon = (filename: string) => {
+  if (filename.endsWith(".vue"))
+    return <FileCode size={13} className="text-green-400 shrink-0" />;
+  if (filename.endsWith(".ts") || filename.endsWith(".tsx"))
+    return <FileType2 size={13} className="text-blue-400 shrink-0" />;
+  if (filename.endsWith(".js") || filename.endsWith(".jsx"))
+    return <FileType2 size={13} className="text-yellow-400 shrink-0" />;
+  if (filename.endsWith(".json"))
+    return <FileJson size={13} className="text-yellow-200 shrink-0" />;
+  if (filename.endsWith(".css"))
+    return <FileBox size={13} className="text-blue-300 shrink-0" />;
+  if (filename.endsWith(".html"))
+    return <FileCode size={13} className="text-orange-400 shrink-0" />;
+  return <FileBox size={13} className="text-gray-400 shrink-0" />;
+};
+
+export default function EditorArea({ activeFile, fileSystem, onCursorChange }: EditorAreaProps) {
+  const { theme } = useTheme();
+  const [content, setContent] = useState("");
+  const [openTabs, setOpenTabs] = useState<string[]>([activeFile]);
+
   useEffect(() => {
+    if (!openTabs.includes(activeFile)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setOpenTabs((prev) => [...prev, activeFile]);
+    }
     if (fileSystem[activeFile] !== undefined) {
       setContent(fileSystem[activeFile]);
     } else {
-      setContent('');
+      setContent("");
     }
   }, [activeFile, fileSystem]);
 
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      fileSystem[activeFile] = value;
       updateFile(activeFile, value);
     }
   };
 
-  const getLanguage = (file: string) => {
-    if (file.endsWith('.ts') || file.endsWith('.tsx')) return 'typescript';
-    if (file.endsWith('.js') || file.endsWith('.jsx')) return 'javascript';
-    if (file.endsWith('.json')) return 'json';
-    if (file.endsWith('.css')) return 'css';
-    if (file.endsWith('.html')) return 'html';
-    if (file.endsWith('.vue')) return 'html'; // default highlight for vue in generic monaco
-    return 'plaintext';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleCursorPositionChange = (editor: any) => {
+    const position = editor.getPosition();
+    if (position && onCursorChange) {
+      onCursorChange(position.lineNumber, position.column);
+    }
   };
 
+  const closeTab = (path: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenTabs((prev) => prev.filter((t) => t !== path));
+  };
+
+  const getLanguage = (file: string) => {
+    if (file.endsWith(".ts") || file.endsWith(".tsx")) return "typescript";
+    if (file.endsWith(".js") || file.endsWith(".jsx")) return "javascript";
+    if (file.endsWith(".json")) return "json";
+    if (file.endsWith(".css")) return "css";
+    if (file.endsWith(".html")) return "html";
+    if (file.endsWith(".vue")) return "html";
+    return "plaintext";
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorWillMount = (monaco: any) => {
-    // 🔥 1. CONFIGURACIÓN PARA TYPESCRIPT (TS / TSX)
     const compilerOptions = {
       target: monaco.languages.typescript.ScriptTarget.Latest,
       allowNonTsExtensions: true,
@@ -48,27 +93,19 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
       noEmit: true,
       esModuleInterop: true,
       jsx: monaco.languages.typescript.JsxEmit.React,
-      reactNamespace: 'React',
+      reactNamespace: "React",
       allowJs: true,
     };
-
     monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
 
-    // Tipos simulados para React, Vue y el entorno en general JSX/JS
     const extraTypes = `
-      declare module 'react' {
-        export = React;
-      }
+      declare module 'react' { export = React; }
       declare namespace React {
         function useState<T>(initialState: T | (() => T)): [T, (newState: T | ((prevState: T) => T)) => void];
         function useEffect(effect: () => void | (() => void), deps?: ReadonlyArray<any>): void;
       }
-      declare namespace JSX {
-        interface IntrinsicElements {
-          [elemName: string]: any;
-        }
-      }
+      declare namespace JSX { interface IntrinsicElements { [elemName: string]: any; } }
       declare module 'vue' {
         export function ref<T>(value: T): { value: T };
         export function reactive<T>(target: T): T;
@@ -76,59 +113,115 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
         export function onMounted(callback: () => void): void;
       }
     `;
-
-    // Aplicar a TypeScript (archivos .ts, .tsx)
-    monaco.languages.typescript.typescriptDefaults.addExtraLib(extraTypes, 'file:///node_modules/@types/global/index.d.ts');
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      extraTypes,
+      "file:///node_modules/@types/global/index.d.ts"
+    );
     monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: false,
       noSyntaxValidation: false,
     });
-
-    // 🔥 2. CONFIGURACIÓN PARA JAVASCRIPT (JS / JSX)
-    // Aplicar lo mismo al validador de JS para que no haya falsos errores en archivos .js
-    monaco.languages.typescript.javascriptDefaults.addExtraLib(extraTypes, 'file:///node_modules/@types/global/index.d.ts');
+    monaco.languages.typescript.javascriptDefaults.addExtraLib(
+      extraTypes,
+      "file:///node_modules/@types/global/index.d.ts"
+    );
     monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: false,
       noSyntaxValidation: false,
     });
-
-    // 🔥 3. CONFIGURACIÓN PARA HTML / VUE (.html, .vue)
-    // Al formatear vue como HTML, evitamos que marque atributos personalizados (como @click, v-if, etc) como erróneos.
-    if (monaco.languages.html && monaco.languages.html.htmlDefaults) {
+    if (monaco.languages.html?.htmlDefaults) {
       monaco.languages.html.htmlDefaults.setOptions({
         suggest: { html5: true },
-        format: {
-          enable: true,
-          unformatted: '',
-          wrapAttributes: 'auto'
-        }
+        format: { enable: true, unformatted: "", wrapAttributes: "auto" },
       });
     }
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#1e1e1e]">
-      <div className="flex h-9 bg-[#252526] overflow-x-auto shrink-0 border-b border-[#1e1e1e]">
-        <div className="flex items-center px-4 bg-[#1e1e1e] border-t-2 border-[#007acc] text-[#cccccc] cursor-pointer min-w-[120px] max-w-[200px] text-[13px]">
-           <span className="truncate">{activeFile.split('/').pop()}</span>
+    <div
+      className="flex flex-col h-full w-full"
+      style={{ background: "var(--bg-primary)" }}
+    >
+      <div
+        className="flex h-9 overflow-x-auto shrink-0 border-b items-end"
+        style={{
+          background: "var(--bg-secondary)",
+          borderColor: "var(--border)",
+        }}
+      >
+        {openTabs.map((tab) => {
+          const isActive = tab === activeFile;
+          const fileName = tab.split("/").pop() ?? tab;
+          return (
+            <div
+              key={tab}
+              onClick={() => {
+                if (fileSystem[tab] !== undefined) setContent(fileSystem[tab]);
+              }}
+              className="flex items-center gap-1.5 px-3 cursor-pointer group shrink-0 border-r transition-colors"
+              style={{
+                height: "36px",
+                background: isActive ? "var(--tab-active-bg)" : "var(--tab-inactive-bg)",
+                borderTop: isActive ? "2px solid var(--accent)" : "2px solid transparent",
+                borderRight: `1px solid var(--border)`,
+                color: isActive ? "var(--text-heading)" : "var(--text-secondary)",
+                minWidth: "120px",
+                maxWidth: "180px",
+              }}
+            >
+              {getFileIcon(fileName)}
+              <span className="text-[12px] truncate flex-1">{fileName}</span>
+              <button
+                onClick={(e) => closeTab(tab, e)}
+                className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all shrink-0 rounded p-0.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+        <div className="ml-auto flex items-center px-2 gap-1">
+          <button
+            className="p-1 rounded hover:opacity-70 transition-opacity"
+            style={{ color: "var(--text-secondary)" }}
+            title="Split editor"
+          >
+            <LayoutPanelLeft size={14} />
+          </button>
+          <button
+            className="p-1 rounded hover:opacity-70 transition-opacity"
+            style={{ color: "var(--text-secondary)" }}
+            title="More actions"
+          >
+            <MoreHorizontal size={14} />
+          </button>
         </div>
       </div>
+
       <div className="flex-1 w-full pt-1 relative">
         <Editor
           height="100%"
           language={getLanguage(activeFile)}
-          theme="vs-dark"
+          theme={theme === "dark" ? "vs-dark" : "vs"}
           value={content}
           onChange={handleEditorChange}
           beforeMount={handleEditorWillMount}
           path={activeFile}
+          onMount={(editor) => {
+            editor.onDidChangeCursorPosition(() => handleCursorPositionChange(editor));
+          }}
           options={{
             minimap: { enabled: false },
             fontSize: 14,
-            wordWrap: 'on',
+            wordWrap: "on",
             scrollBeyondLastLine: false,
             smoothScrolling: true,
-            padding: { top: 10 }
+            padding: { top: 10 },
+            lineNumbers: "on",
+            glyphMargin: false,
+            folding: true,
+            renderLineHighlight: "line",
           }}
         />
       </div>
