@@ -1,3 +1,5 @@
+//editor-de-codigo/src/components/QuestionPanel.tsx
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -25,7 +27,6 @@ export default function QuestionPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [questionData, setQuestionData] = useState<QuestionData | null>(null);
-  const hasLoadedRef = useState(false)[0]; // solo para tracking, usaremos useEffect con selectedFramework
 
   useEffect(() => {
     if (selectedFramework) {
@@ -34,13 +35,33 @@ export default function QuestionPanel({
   }, [selectedFramework]);
 
   const loadQuestions = async (framework: "vuejs" | "nextjs") => {
+    const cacheKey = `question_${framework}`;
+    
+    // ✅ 1. Revisar caché primero
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        const parsedData = JSON.parse(cached) as QuestionData;
+        setQuestionData(parsedData);
+        return;
+      } catch (err) {
+        console.error("Error parsing cached data:", err);
+        // Si hay error al parsear, continuar para obtener datos frescos
+      }
+    }
+
     const endpoint = framework === "vuejs" ? "vue" : "next";
     setIsLoading(true);
     setError(null);
+    
     try {
       const response = await fetch(`http://127.0.0.1:8000/api/generar-preguntas/${endpoint}`);
       if (!response.ok) throw new Error("No se pudo obtener las preguntas");
       const data = await response.json();
+      
+      // ✅ 2. Guardar en caché
+      sessionStorage.setItem(cacheKey, JSON.stringify(data));
+      
       setQuestionData(data);
     } catch (err) {
       setQuestionData(null);
@@ -52,26 +73,30 @@ export default function QuestionPanel({
 
   const handleRetry = () => {
     if (selectedFramework) {
+      // Limpiar caché para reintentar
+      const cacheKey = `question_${selectedFramework}`;
+      sessionStorage.removeItem(cacheKey);
       loadQuestions(selectedFramework);
     }
   };
 
   return (
     <div
-      className="border-b shrink-0"
+      className="h-full flex flex-col"
       style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", borderColor: "var(--border)" }}
     >
       <details
         open={isQuestionOpen}
         onToggle={(e) => onToggleOpen((e.currentTarget as HTMLDetailsElement).open)}
+        className="h-full flex flex-col"
       >
-        <summary className="w-full flex items-center justify-between px-4 py-2 text-left text-[12px] font-semibold uppercase tracking-widest cursor-pointer list-none">
+        <summary className="w-full flex items-center justify-between px-4 py-3 text-left text-[12px] font-semibold uppercase tracking-widest cursor-pointer list-none border-b" style={{ borderColor: "var(--border)" }}>
           <span>📋 Pregunta de la prueba</span>
           <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
             {selectedFramework ? (selectedFramework === "vuejs" ? "Vue.js" : "Next.js") : "Sin seleccionar"}
           </span>
         </summary>
-        <div className="px-4 pb-3 text-[12px] max-h-56 overflow-auto" style={{ color: "var(--text-secondary)" }}>
+        <div className="flex-1 px-4 py-4 text-[12px] overflow-auto" style={{ color: "var(--text-secondary)" }}>
           {isLoading && (
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
@@ -101,7 +126,7 @@ export default function QuestionPanel({
             </div>
           )}
           {!isLoading && !error && questionData && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-start gap-2">
                 <span className="text-base">🎯</span>
                 <div>

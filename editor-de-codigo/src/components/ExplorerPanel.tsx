@@ -305,7 +305,14 @@ export default function ExplorerPanel({
   const [expandedFolders, setExpandedFolders] = useState<
     Record<string, boolean>
   >({});
-  const [visibleRoot, setVisibleRoot] = useState<string | null>(null);
+  const [visibleRoot, setVisibleRoot] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const framework = params.get("framework");
+    if (framework === "vuejs") return "/practica-vue";
+    if (framework === "nextjs") return "/practica-nextjs";
+    return null;
+  });
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -314,14 +321,6 @@ export default function ExplorerPanel({
     isFolder: boolean;
   } | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string } | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const framework = params.get("framework");
-    if (framework === "vuejs") setVisibleRoot("/practica-vue");
-    if (framework === "nextjs") setVisibleRoot("/practica-nextjs");
-  }, []);
 
   type TreeNode = { [key: string]: TreeNode | string };
 

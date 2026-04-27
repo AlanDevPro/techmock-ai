@@ -36,21 +36,39 @@ export default function Sidebar({
   onResizeStart,
   onResizeEnd,
 }: SidebarProps) {
+  // Función auxiliar para manejar la selección de archivos con log de depuración
+  const handleFileSelect = (file: string, line?: number) => {
+    console.log("📁 Sidebar - archivo seleccionado:", file);
+    console.log("📁 Sidebar - línea (si existe):", line);
+    onSelectFile(file, line);
+  };
+
   const renderContent = () => {
     switch (activeView) {
       case "problem":
-        return <QuestionPanel selectedFramework={selectedFramework} isQuestionOpen={isQuestionOpen} onToggleOpen={onToggleOpen} />;
+        return (
+          <QuestionPanel 
+            selectedFramework={selectedFramework} 
+            isQuestionOpen={isQuestionOpen} 
+            onToggleOpen={onToggleOpen} 
+          />
+        );
       case "explorer":
         return (
           <ExplorerPanel
             activeFile={activeFile}
-            onSelectFile={onSelectFile}
+            onSelectFile={handleFileSelect}
             files={files}
             onRefresh={onRefresh}
           />
         );
       case "search":
-        return <SearchPanel files={files} onSelectFile={onSelectFile} />;
+        return (
+          <SearchPanel 
+            files={files} 
+            onSelectFile={handleFileSelect} 
+          />
+        );
       case "settings":
         return (
           <div className="p-4" style={{ background: "var(--bg-primary)", color: "var(--text-primary)" }}>
@@ -72,8 +90,8 @@ export default function Sidebar({
       className="flex flex-col shrink-0 border-r overflow-hidden"
       style={{
         width: `${width}px`,
-        minWidth: "0px", // Sin límite mínimo
-        maxWidth: "500px", // Solo límite máximo para no sobrepasar
+        minWidth: "0px",
+        maxWidth: "500px",
         background: "var(--bg-secondary)",
         borderColor: "var(--border)",
         transition: 'width 0.2s ease'

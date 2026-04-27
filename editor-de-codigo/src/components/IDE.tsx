@@ -40,9 +40,13 @@ export default function IDE() {
   
   // Estados para la Terminal
   const [isTerminalVisible, setIsTerminalVisible] = useState(true);
-  const [terminalHeight, setTerminalHeight] = useState(256); // Altura inicial de 256px (h-64)
+  const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
+  
+  // Estados para el StatusBar dinámico
+  const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
+  const [diagnostics, setDiagnostics] = useState({ errors: 0, warnings: 0, infos: 0 });
   
   const hasLoadedQuestionsRef = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -55,11 +59,43 @@ export default function IDE() {
   // Función para manejar el cambio de vista en ActivityBar
   const handleViewChange = (view: ActivityView) => {
     setActiveView(view);
-    // Si el sidebar está oculto, lo mostramos automáticamente
     if (!isSidebarVisible) {
       setIsSidebarVisible(true);
     }
   };
+
+  // Función para actualizar la posición del cursor desde EditorArea
+  const handleCursorChange = (line: number, column: number) => {
+    setCursorPosition({ line, column });
+  };
+
+  // Detectar errores/warnings reales del archivo activo
+  useEffect(() => {
+    if (activeFile && fileSystem[activeFile]) {
+      const content = fileSystem[activeFile];
+      let errors = 0, warnings = 0, infos = 0;
+      
+      if (content) {
+        // Análisis de errores reales
+        if (content.match(/error/i)) errors = (content.match(/error/i) || []).length;
+        if (content.match(/warning/i)) warnings = (content.match(/warning/i) || []).length;
+        if (content.match(/TODO|FIXME|HACK/i)) infos = (content.match(/TODO|FIXME|HACK/i) || []).length;
+        
+        // Errores de sintaxis adicionales
+        if (content.includes("undefined")) errors++;
+        if (content.includes("null reference")) errors++;
+        if (content.includes("console.log")) infos++;
+        
+        // Advertencias de estilo
+        if (content.includes("var ")) warnings++;
+        if (content.match(/==/g) && !content.match(/===/g)) warnings++;
+      }
+      
+      setDiagnostics({ errors, warnings, infos });
+    } else {
+      setDiagnostics({ errors: 0, warnings: 0, infos: 0 });
+    }
+  }, [activeFile, fileSystem]);
 
   const cssVars: Record<string, string> =
     theme === "dark"
@@ -127,14 +163,18 @@ export default function IDE() {
     if (framework === "vuejs" || framework === "nextjs") {
       hasLoadedQuestionsRef.current = true;
       setSelectedFramework(framework);
+      if (framework === "vuejs") {
+        setActiveFile("/practica-vue/src/App.vue");
+      } else if (framework === "nextjs") {
+        setActiveFile("/practica-nextjs/pages/index.js");
+      }
     }
   }, []);
 
-  // Manejar el redimensionamiento del preview (lado derecho)
+  // Manejar el redimensionamiento del preview
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingPreview) return;
-      
       const newWidth = window.innerWidth - e.clientX;
       const minWidth = 200;
       const maxWidth = window.innerWidth * 0.7;
@@ -161,23 +201,20 @@ export default function IDE() {
     };
   }, [isResizingPreview]);
 
-  // Manejar el redimensionamiento del sidebar (lado izquierdo) - sin límite mínimo
+  // Manejar el redimensionamiento del sidebar
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingSidebar) return;
-      
       const newWidth = e.clientX;
       const maxWidth = 500;
-      const newWidthValue = newWidth;
       
-      // Si el ancho es menor a 10px, consideramos que se quiere ocultar
-      if (newWidthValue < 10) {
+      if (newWidth < 10) {
         setIsSidebarVisible(false);
         setIsResizingSidebar(false);
         return;
       }
       
-      const clampedWidth = Math.min(newWidthValue, maxWidth);
+      const clampedWidth = Math.min(newWidth, maxWidth);
       setSidebarWidth(clampedWidth);
     };
 
@@ -200,20 +237,16 @@ export default function IDE() {
     };
   }, [isResizingSidebar]);
 
-  // Manejar el redimensionamiento de la terminal (vertical)
+  // Manejar el redimensionamiento de la terminal
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingTerminal) return;
-      
       const windowHeight = window.innerHeight;
       const mouseY = e.clientY;
       const maxHeight = windowHeight * 0.7;
       const minHeight = 50;
-      
-      // Calcular la nueva altura desde la parte inferior
       const newHeight = windowHeight - mouseY;
       
-      // Si la altura es menor a 30px, ocultar la terminal
       if (newHeight < 30) {
         setIsTerminalVisible(false);
         setIsResizingTerminal(false);
@@ -223,7 +256,6 @@ export default function IDE() {
       const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
       setTerminalHeight(clampedHeight);
       
-      // Forzar el reajuste del terminal después de cambiar el tamaño
       setTimeout(() => {
         if (terminalAreaRef.current?.fitTerminal) {
           terminalAreaRef.current.fitTerminal();
@@ -259,10 +291,16 @@ export default function IDE() {
   };
 
   const handleSelectFileWithLine = (file: string, line?: number) => {
+    console.log("📄 handleSelectFileWithLine llamado con:", file);
     setActiveFile(file);
     if (line) {
       console.log(`Navegar a línea ${line} en el archivo ${file}`);
     }
+  };
+
+  const handleSelectFile = (file: string) => {
+    console.log("📄 handleSelectFile llamado con:", file);
+    setActiveFile(file);
   };
 
   const handleRunTests = async () => {
@@ -274,16 +312,13 @@ export default function IDE() {
 
   const handleSubmitCode = async () => {
     console.log("🚀 Iniciando handleSubmitCode...");
-    
     setSubmitStatus("running");
-
     console.log("📁 activeFile:", activeFile);
     console.log("📂 fileSystem keys:", Object.keys(fileSystem));
     console.log("📊 Total de archivos en fileSystem:", Object.keys(fileSystem).length);
     
     if (!fileSystem[activeFile]) {
       console.error("❌ El archivo activo no existe en fileSystem:", activeFile);
-      console.log("📂 Archivos disponibles:", Object.keys(fileSystem));
       setSubmitStatus("error");
       setTimeout(() => setSubmitStatus(null), 3000);
       return;
@@ -343,7 +378,7 @@ export default function IDE() {
       console.log("   - Claves del resultado:", Object.keys(resultado));
 
       sessionStorage.setItem("analisis_resultado", JSON.stringify(resultado));
-      console.log("💾 Resultado guardado en sessionStorage con clave 'analisis_resultado'");
+      console.log("💾 Resultado guardado en sessionStorage");
 
       setSubmitStatus("success");
       console.log("✅ Submit completado con éxito, redirigiendo a /analisis...");
@@ -377,7 +412,12 @@ export default function IDE() {
           </div>
         )}
 
-        <TopMenuBar theme={theme} toggleTheme={toggleTheme} selectedFramework={selectedFramework} />
+        <TopMenuBar 
+          theme={theme} 
+          toggleTheme={toggleTheme} 
+          selectedFramework={selectedFramework}
+          activeFile={activeFile}
+        />
 
         <div
           className="flex items-center justify-between px-4 text-[12px] select-none shrink-0 border-b"
@@ -440,7 +480,6 @@ export default function IDE() {
           <LeftPanel />
           <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
           
-          {/* Sidebar con su handle de redimensionamiento */}
           {isSidebarVisible && (
             <>
               <Sidebar
@@ -468,7 +507,6 @@ export default function IDE() {
           )}
 
           <div className="flex flex-col flex-1 h-full min-w-0">
-            {/* Editor + Preview */}
             <div 
               className="flex-1 min-h-0 relative flex flex-row" 
               style={{ 
@@ -490,10 +528,13 @@ export default function IDE() {
                       transition: isResizingPreview ? 'none' : 'width 0.2s ease'
                     }}
                   >
-                    <EditorArea activeFile={activeFile} fileSystem={fileSystem} />
+                    <EditorArea 
+                      activeFile={activeFile} 
+                      fileSystem={fileSystem}
+                      onCursorChange={handleCursorChange}
+                    />
                   </div>
                   
-                  {/* Resize handle - solo visible cuando preview está visible */}
                   {isPreviewVisible && (
                     <div
                       className="cursor-ew-resize hover:bg-accent transition-colors"
@@ -506,7 +547,6 @@ export default function IDE() {
                     />
                   )}
                   
-                  {/* Preview Area con ancho dinámico */}
                   {isPreviewVisible && (
                     <div
                       className="h-full flex flex-col"
@@ -527,7 +567,6 @@ export default function IDE() {
               )}
             </div>
 
-            {/* Handle de redimensionamiento vertical de la terminal */}
             {isTerminalVisible && (
               <div
                 className="cursor-ns-resize hover:bg-accent transition-colors"
@@ -540,7 +579,6 @@ export default function IDE() {
               />
             )}
 
-            {/* Terminal con altura dinámica */}
             {isTerminalVisible && (
               <div 
                 className="border-t flex flex-col shrink-0"
@@ -566,7 +604,6 @@ export default function IDE() {
                   <TerminalArea 
                     isBooting={isBooting}
                     onReady={() => {
-                      // Forzar el fit del terminal cuando esté listo
                       setTimeout(() => {
                         if (terminalAreaRef.current?.fitTerminal) {
                           terminalAreaRef.current.fitTerminal();
@@ -578,7 +615,6 @@ export default function IDE() {
               </div>
             )}
 
-            {/* Action bar (si la terminal está oculta, mostramos la barra de acciones abajo) */}
             {!isTerminalVisible && (
               <div
                 className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
@@ -596,14 +632,7 @@ export default function IDE() {
                   <span className="text-[12px] text-red-400 font-semibold">✗ Error al analizar</span>
                 )}
 
-                <button
-                  onClick={handleRunTests}
-                  disabled={submitStatus === "running"}
-                  className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                  style={{ background: "var(--btn-run-bg)" }}
-                >
-                  Run Tests
-                </button>
+                
                 <button
                   onClick={handleSubmitCode}
                   disabled={submitStatus === "running"}
@@ -617,7 +646,21 @@ export default function IDE() {
           </div>
         </div>
 
-        <StatusBar isBooting={isBooting} />
+        <StatusBar 
+          isBooting={isBooting}
+          line={cursorPosition.line}
+          column={cursorPosition.column}
+          indentSize={2}
+          encoding="UTF-8"
+          lineEnding="CRLF"
+          language={activeFile?.split(".").pop() === "tsx" ? "TypeScript JSX" : activeFile?.split(".").pop() === "vue" ? "Vue.js" : "TypeScript"}
+          branch="main"
+          errors={diagnostics.errors}
+          warnings={diagnostics.warnings}
+          infos={diagnostics.infos}
+          activeFile={activeFile}
+          fileSystem={fileSystem}
+        />
       </div>
     </ThemeContext.Provider>
   );

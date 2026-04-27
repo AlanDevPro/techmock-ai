@@ -17,6 +17,7 @@ import {
 interface EditorAreaProps {
   activeFile: string;
   fileSystem: { [key: string]: string };
+  onCursorChange?: (line: number, column: number) => void;
 }
 
 const getFileIcon = (filename: string) => {
@@ -35,15 +36,14 @@ const getFileIcon = (filename: string) => {
   return <FileBox size={13} className="text-gray-400 shrink-0" />;
 };
 
-export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) {
+export default function EditorArea({ activeFile, fileSystem, onCursorChange }: EditorAreaProps) {
   const { theme } = useTheme();
   const [content, setContent] = useState("");
-  // Multi-tab: track open tabs
   const [openTabs, setOpenTabs] = useState<string[]>([activeFile]);
 
   useEffect(() => {
-    // Add new file to tabs if not present
     if (!openTabs.includes(activeFile)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenTabs((prev) => [...prev, activeFile]);
     }
     if (fileSystem[activeFile] !== undefined) {
@@ -56,8 +56,15 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      fileSystem[activeFile] = value;
       updateFile(activeFile, value);
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleCursorPositionChange = (editor: any) => {
+    const position = editor.getPosition();
+    if (position && onCursorChange) {
+      onCursorChange(position.lineNumber, position.column);
     }
   };
 
@@ -76,6 +83,7 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
     return "plaintext";
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorWillMount = (monaco: any) => {
     const compilerOptions = {
       target: monaco.languages.typescript.ScriptTarget.Latest,
@@ -134,7 +142,6 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
       className="flex flex-col h-full w-full"
       style={{ background: "var(--bg-primary)" }}
     >
-      {/* Tab bar */}
       <div
         className="flex h-9 overflow-x-auto shrink-0 border-b items-end"
         style={{
@@ -174,7 +181,6 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
             </div>
           );
         })}
-        {/* Toolbar right side */}
         <div className="ml-auto flex items-center px-2 gap-1">
           <button
             className="p-1 rounded hover:opacity-70 transition-opacity"
@@ -193,7 +199,6 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
         </div>
       </div>
 
-      {/* Monaco Editor */}
       <div className="flex-1 w-full pt-1 relative">
         <Editor
           height="100%"
@@ -203,6 +208,9 @@ export default function EditorArea({ activeFile, fileSystem }: EditorAreaProps) 
           onChange={handleEditorChange}
           beforeMount={handleEditorWillMount}
           path={activeFile}
+          onMount={(editor) => {
+            editor.onDidChangeCursorPosition(() => handleCursorPositionChange(editor));
+          }}
           options={{
             minimap: { enabled: false },
             fontSize: 14,
