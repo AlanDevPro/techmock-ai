@@ -377,13 +377,26 @@ export default function IDE() {
       console.log("✅ Resultado recibido del backend:");
       console.log("   - Claves del resultado:", Object.keys(resultado));
 
-      sessionStorage.setItem("analisis_resultado", JSON.stringify(resultado));
+      const resultadoJson = JSON.stringify(resultado);
+      sessionStorage.setItem("analisis_resultado", resultadoJson);
       console.log("💾 Resultado guardado en sessionStorage");
 
       setSubmitStatus("success");
-      console.log("✅ Submit completado con éxito, redirigiendo a /analisis...");
+      console.log("✅ Submit completado con éxito, abriendo /analisis...");
 
-      window.location.href = "http://localhost:3000/analisis";
+      const analysisOrigin = "http://localhost:3000";
+      const analysisUrl = `${analysisOrigin}/analisis`;
+      const analysisWindow = window.open(analysisUrl, "_blank");
+
+      if (analysisWindow) {
+        analysisWindow.postMessage(
+          { type: "analysis_result", payload: resultado },
+          analysisOrigin
+        );
+      } else {
+        // Fallback when popup is blocked.
+        window.location.href = `${analysisUrl}?analysis=${encodeURIComponent(resultadoJson)}`;
+      }
       
     } catch (error) {
       console.error("❌ Error al analizar código:", error);
