@@ -48,12 +48,17 @@ techmock-ai/
    npm install
    ```
 
-2. **Ejecutar en desarrollo**
+2. **Instalar dependencias**
+   ```bash
+   npm install lucide-react
+   ```
+
+3. **Ejecutar en desarrollo**
    ```bash
    npm run dev
    ```
 
-3. **Acceder a la aplicación**
+4. **Acceder a la aplicación**
    - Landing page: http://localhost:3000
    - Autenticación: http://localhost:3000/auth
    - Dashboard: http://localhost:3000/dashboard

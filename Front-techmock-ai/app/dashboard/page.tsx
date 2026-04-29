@@ -8,16 +8,18 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!user && !isLoggingOut) {
       router.push('/auth');
       return;
     }
-  }, [user, router]);
+  }, [user, isLoggingOut, router]);
 
   const handleLogout = async () => {
     try {
+      setIsLoggingOut(true);
       await logout();
       router.push('/');
     } catch (error) {

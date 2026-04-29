@@ -2,21 +2,23 @@
 
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function IDEPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    if (!user && !isLoggingOut) {
       router.push('/auth');
       return;
     }
-  }, [user, router]);
+  }, [user, isLoggingOut, router]);
 
   const handleLogout = async () => {
     try {
+      setIsLoggingOut(true);
       await logout();
       router.push('/');
     } catch (error) {

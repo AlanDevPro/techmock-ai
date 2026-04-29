@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ShieldAlert,
@@ -130,31 +130,59 @@ const tecnicaLabels: Record<string, string> = {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SubmissionsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ Nuevo useEffect: solo lee de sessionStorage
+  // ✅ Resultado por query param o sessionStorage
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem("analisis_resultado");
-
-      if (!stored) {
-        throw new Error("No hay resultado en sessionStorage");
+      const param = searchParams.get("analysis");
+      if (param) {
+        const json: AnalysisResult = JSON.parse(decodeURIComponent(param));
+        sessionStorage.setItem("analisis_resultado", JSON.stringify(json));
+        setData(json);
+        setError(null);
+        return;
       }
 
-      const json: AnalysisResult = JSON.parse(stored);
-      setData(json);
+      const stored = sessionStorage.getItem("analisis_resultado");
+      if (stored) {
+        const json: AnalysisResult = JSON.parse(stored);
+        setData(json);
+        setError(null);
+        return;
+      }
+
+      setError("No hay resultado en sessionStorage");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setLoading(false);
     }
+  }, [searchParams]);
+
+  // ✅ Recibir resultado desde el IDE (postMessage)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== "http://localhost:3001") return;
+      if (!event.data || event.data.type !== "analysis_result") return;
+
+      const payload = event.data.payload as AnalysisResult;
+      sessionStorage.setItem("analisis_resultado", JSON.stringify(payload));
+      setData(payload);
+      setError(null);
+      setLoading(false);
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Función para volver al IDE (puerto 3001)
-  const goToIDE = () => {
-    window.location.href = "http://localhost:3001/";
+  // Volver al dashboard
+  const goToDashboard = () => {
+    router.push('/dashboard');
   };
 
   const nivel = data?.calificacion_general.nivel ?? "";
@@ -195,9 +223,11 @@ export default function SubmissionsPage() {
             </p>
           </div>
         </div>
-        <button onClick={goToIDE}
-          className="mt-4 px-6 py-2.5 rounded-lg text-sm font-medium border border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400 transition-all flex items-center gap-2">
-          <ArrowLeft size={16} /> Volver al IDE
+        <button
+          onClick={goToDashboard}
+          className="mt-4 px-6 py-2.5 rounded-lg text-sm font-medium border border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400 transition-all flex items-center gap-2"
+        >
+          <ArrowLeft size={16} /> Volver
         </button>
       </div>
     );
@@ -211,9 +241,11 @@ export default function SubmissionsPage() {
       {/* Top bar */}
       <div className="sticky top-0 z-20 flex items-center gap-3 px-6 py-3 border-b"
         style={{ background: "#0d1525cc", borderColor: "#1e293b", backdropFilter: "blur(12px)" }}>
-        <button onClick={goToIDE}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors">
-          <ArrowLeft size={14} /> Volver al IDE
+        <button
+          onClick={goToDashboard}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft size={14} /> Volver
         </button>
         <span className="text-slate-700">|</span>
         <Code2 size={14} className="text-blue-400" />
