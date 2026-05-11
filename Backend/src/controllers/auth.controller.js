@@ -1,4 +1,3 @@
-// controllers/auth.controller.js
 import {
   syncFirebaseUser,
   registrarConPassword,
@@ -6,6 +5,9 @@ import {
   refreshAccessToken,
   logout as logoutService,
   logoutAllDevices,
+  forgotPassword,
+  resetPassword,
+  setPasswordForOAuthUser, // ✅ NUEVO
 } from "../services/auth.service.js";
 import { RefreshTokenModel } from "../models/refreshToken.model.js";
 import { AuthProviderModel } from "../models/authProvider.model.js";
@@ -42,20 +44,11 @@ async function getProviders(userId) {
     "SELECT provider FROM auth_providers WHERE user_id = $1",
     [userId]
   );
-
-  console.log("🧪 USER ID:", userId);
-  console.log("🧪 PROVIDERS DESDE DB:", result.rows);
-
   const providers = result.rows.map((r) => r.provider);
-
-  console.log("🧪 PROVIDERS MAPEADOS:", providers);
-
   return providers;
 }
 
-
-
-// ── POST /api/v1/auth/firebase (Google y GitHub) ──────────────────────
+// ── POST /api/v1/auth/firebase ────────────────────────────────────────
 export const firebaseAuth = async (req, res, next) => {
   const firebaseToken = req.headers.authorization?.replace("Bearer ", "");
   if (!firebaseToken) {
@@ -67,8 +60,6 @@ export const firebaseAuth = async (req, res, next) => {
     const ip = req.ip || req.connection.remoteAddress;
 
     const { usuario, accessToken, refreshToken } = await syncFirebaseUser(firebaseToken, { dispositivo, ip });
-
-    // ✅ Incluir providers
     const providers = await getProviders(usuario.id);
 
     res.json({
@@ -80,7 +71,7 @@ export const firebaseAuth = async (req, res, next) => {
         apellido: usuario.apellido,
         avatar: usuario.avatar_url,
         rol: usuario.rol,
-        providers, // ✅
+        providers,
       },
       accessToken,
       refreshToken,
@@ -90,7 +81,7 @@ export const firebaseAuth = async (req, res, next) => {
   }
 };
 
-// ── POST /api/v1/auth/register (email + password) ─────────────────────
+// ── POST /api/v1/auth/register ────────────────────────────────────────
 export const register = async (req, res, next) => {
   try {
     const { email, nombre, apellido, password } = req.body;
@@ -118,7 +109,6 @@ export const register = async (req, res, next) => {
       { dispositivo, ip }
     );
 
-    // ✅ Incluir providers
     const providers = await getProviders(usuario.id);
 
     res.status(201).json({
@@ -130,7 +120,7 @@ export const register = async (req, res, next) => {
         apellido: usuario.apellido,
         avatar: usuario.avatar_url,
         rol: usuario.rol,
-        providers, // ✅
+        providers,
       },
       accessToken,
       refreshToken,
@@ -140,8 +130,9 @@ export const register = async (req, res, next) => {
   }
 };
 
-// ── POST /api/v1/auth/login (email + password) ───────────────────────
+// ── POST /api/v1/auth/login ───────────────────────────────────────────
 export const login = async (req, res, next) => {
+  console.log("🔥 BODY LOGIN:", req.body);
   try {
     const { email, password } = req.body;
 
@@ -161,7 +152,6 @@ export const login = async (req, res, next) => {
       ip,
     });
 
-    // ✅ Incluir providers
     const providers = await getProviders(usuario.id);
 
     res.json({
@@ -173,7 +163,7 @@ export const login = async (req, res, next) => {
         apellido: usuario.apellido,
         avatar: usuario.avatar_url,
         rol: usuario.rol,
-        providers, // ✅
+        providers,
       },
       accessToken,
       refreshToken,
@@ -196,7 +186,6 @@ export const refreshTokenCtrl = async (req, res, next) => {
     const ip = req.ip || req.connection.remoteAddress;
 
     const { accessToken, refreshToken } = await refreshAccessToken(token, { dispositivo, ip });
-
     res.json({ success: true, accessToken, refreshToken });
   } catch (error) {
     if (error.status === 401) {
@@ -220,7 +209,7 @@ export const logout = async (req, res, next) => {
 // ── POST /api/v1/auth/logout-all ─────────────────────────────────────
 export const logoutAll = async (req, res, next) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.usuario?.id;
     if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
 
     await logoutAllDevices(userId);
@@ -236,7 +225,6 @@ export const getCurrentUser = async (req, res, next) => {
     const user = req.user;
     if (!user) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
 
-    // ✅ Incluir providers
     const providers = await getProviders(user.id);
 
     res.json({
@@ -252,7 +240,7 @@ export const getCurrentUser = async (req, res, next) => {
         linkedin_url: user.linkedin_url,
         telefono: user.telefono,
         email_verificado: user.email_verificado,
-        providers, // ✅
+        providers,
       },
     });
   } catch (error) {
@@ -264,7 +252,7 @@ export const getCurrentUser = async (req, res, next) => {
 export const changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    const userId = req.user?.id;
+    const userId = req.usuario?.id;
 
     if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
 
@@ -299,10 +287,48 @@ export const changePassword = async (req, res, next) => {
   }
 };
 
+// ── POST /api/v1/auth/forgot-password ────────────────────────────────
+export const forgotPasswordCtrl = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== "string" || !email.trim()) {
+      return res.status(400).json({ success: false, error: "El email es requerido" });
+    }
+
+    const emailError = validarEmail(email);
+    if (emailError) return res.status(400).json({ success: false, error: emailError });
+
+    const result = await forgotPassword(email.trim().toLowerCase());
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/v1/auth/reset-password ─────────────────────────────────
+export const resetPasswordCtrl = async (req, res, next) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || typeof token !== "string" || !token.trim()) {
+      return res.status(400).json({ success: false, error: "Token requerido" });
+    }
+
+    const passwordError = validarPassword(password, "La contraseña");
+    if (passwordError) return res.status(400).json({ success: false, error: passwordError });
+
+    const result = await resetPassword(token.trim(), password);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── GET /api/v1/auth/sessions ─────────────────────────────────────────
 export const getActiveSessions = async (req, res, next) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.usuario?.id;
     if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
 
     const sessions = await RefreshTokenModel.obtenerTokensActivos(userId);
@@ -325,7 +351,7 @@ export const getActiveSessions = async (req, res, next) => {
 // ── DELETE /api/v1/auth/sessions/:sessionId ───────────────────────────
 export const revokeSession = async (req, res, next) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.usuario?.id;
     const { sessionId } = req.params;
 
     if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
@@ -339,6 +365,33 @@ export const revokeSession = async (req, res, next) => {
     if (!revoked) return res.status(404).json({ success: false, error: "Sesión no encontrada" });
 
     res.json({ success: true, message: "Sesión revocada correctamente" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/v1/auth/set-password ✅ NUEVO ───────────────────────────
+export const setPasswordCtrl = async (req, res, next) => {
+  try {
+    const userId = req.usuario?.id;
+    const { password } = req.body;
+    
+
+    console.log("👤 USER ID:", req.usuario?.id);
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Usuario no autenticado" });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: "La contraseña debe tener al menos 6 caracteres",
+      });
+    }
+
+    const result = await setPasswordForOAuthUser(userId, password);
+    res.json(result);
   } catch (error) {
     next(error);
   }

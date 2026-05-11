@@ -37,6 +37,7 @@ interface AuthContextType {
   linkGithubToCurrentUser: () => Promise<void>;
   linkGoogleToCurrentUser: () => Promise<void>;
   getLinkedProviders: () => string[];
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -104,6 +105,9 @@ function clearTokens() {
 async function syncFirebaseUserWithBackend(firebaseUser: FirebaseUser): Promise<AppUser> {
   const idToken = await firebaseUser.getIdToken();
 
+  console.log("🔥 [AUTH] syncFirebaseUserWithBackend - idToken enviado");
+  console.log("🔥 [AUTH] URL:", `${API}/auth/firebase`);
+
   const res = await fetch(`${API}/auth/firebase`, {
     method: 'POST',
     headers: {
@@ -113,6 +117,9 @@ async function syncFirebaseUserWithBackend(firebaseUser: FirebaseUser): Promise<
   });
 
   const data = await res.json();
+
+  console.log("🔥 [AUTH] Response status:", res.status);
+  console.log("🔥 [AUTH] Response data:", data);
 
   if (!res.ok) {
     throw new Error(data.error ?? `Error sincronizando usuario: ${res.status}`);
@@ -218,13 +225,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // ─────────────────────────────────────────────
 
   const login = async (email: string, password: string): Promise<void> => {
+    console.log("🔥 [AUTH] LOGIN ATTEMPT");
+    console.log("🔥 [AUTH] Login payload:", { email, password });
+    console.log("🔥 [AUTH] API URL:", `${API}/auth/login`);
+    
     const res = await fetch(`${API}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ email, password })
     });
 
+    console.log("🔥 [AUTH] Response status:", res.status);
+    
     const data = await res.json();
+    console.log("🔥 [AUTH] Response data:", data);
 
     if (!res.ok) {
       throw new Error(data.error ?? 'Error al iniciar sesión');
@@ -245,38 +261,64 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUser(appUser);
   };
 
+  
+  
+  
   const register = async (
-    email: string,
-    password: string,
-    name: string,
-    apellido?: string
-  ): Promise<void> => {
-    const res = await fetch(`${API}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, nombre: name, apellido }),
-    });
+  email: string,
+  password: string,
+  name: string,
+  apellido?: string
+): Promise<void> => {
+  console.log("🔥 [AUTH] REGISTER ATTEMPT");
 
-    const data = await res.json();
+  // 1. VALIDACIÓN FRONTEND (IMPORTANTE)
+  const strongPasswordRegex =
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/;
 
-    if (!res.ok) {
-      throw new Error(data.error ?? 'Error al registrar');
-    }
+  if (!strongPasswordRegex.test(password)) {
+    throw new Error(
+      "La contraseña debe tener mayúscula, minúscula, número y símbolo (@$!%*?&)"
+    );
+  }
 
-    saveTokens(data.accessToken, data.refreshToken);
+  if (!name?.trim()) {
+    throw new Error("El nombre es obligatorio");
+  }
 
-    // ✅ CORRECCIÓN: usar data.user.providers
-    const decoded = decodeJWT(data.accessToken);
-    if (!decoded) throw new Error('Token inválido recibido del backend');
+  // 2. REQUEST AL BACKEND
+  const res = await fetch(`${API}/auth/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      nombre: name.trim(),   // 🔥 CRÍTICO
+      apellido
+    })
+  });
 
-    const appUser: AppUser = {
-      ...decoded,
-      providers: data.user?.providers ?? [],
-    };
+  const data = await res.json();
 
-    console.log('🔍 [AUTH] register → providers:', appUser.providers);
-    setUser(appUser);
-  };
+  console.log("🔥 [AUTH] RESPONSE:", data);
+
+  if (!res.ok) {
+    throw new Error(data.error ?? "Error al registrar");
+  }
+
+  saveTokens(data.accessToken, data.refreshToken);
+
+  const decoded = decodeJWT(data.accessToken);
+  if (!decoded) throw new Error("Token inválido");
+
+  setUser({
+    ...decoded,
+    providers: data.user?.providers ?? []
+  });
+};
+
 
   // ─────────────────────────────────────────────
   // OAUTH
@@ -366,6 +408,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   // ─────────────────────────────────────────────
+  // RESET PASSWORD
+  // ─────────────────────────────────────────────
+  
+  const resetPassword = async (email: string): Promise<void> => {
+    console.log("🔥 [AUTH] forgot-password payload:", { email });
+    console.log("🔥 [AUTH] URL:", `${API}/auth/forgot-password`);
+    
+    const res = await fetch(`${API}/auth/forgot-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    const data = await res.json();
+    console.log("🔥 [AUTH] Response status:", res.status);
+    console.log("🔥 [AUTH] Response data:", data);
+
+    if (!res.ok) {
+      throw new Error(data.error || 'No se pudo enviar el correo');
+    }
+  };
+
+  // ─────────────────────────────────────────────
   // LOGOUT
   // ─────────────────────────────────────────────
 
@@ -410,6 +477,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         linkGithubToCurrentUser,
         linkGoogleToCurrentUser,
         getLinkedProviders,
+        resetPassword,
         logout,
       }}
     >

@@ -1,4 +1,3 @@
-// services/auth.service.js
 import { db } from "../config/database.js";
 import { UsuarioModel } from "../models/usuario.model.js";
 import { AuthProviderModel } from "../models/authProvider.model.js";
@@ -10,6 +9,8 @@ import {
   revocarTodosLosTokens,
 } from "./token.service.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { sendResetPasswordEmail } from "./email.service.js";
 
 // ── Google / GitHub vía Firebase ──────────────────────────────────────
 export async function syncFirebaseUser(firebaseToken, { dispositivo, ip } = {}) {
@@ -32,7 +33,6 @@ export async function registrarConPassword(
   { dispositivo, ip } = {}
 ) {
   try {
-    // Validar que el email no esté ya registrado antes de hashear
     const usuarioExistente = await UsuarioModel.findByEmail(email);
     if (usuarioExistente) {
       throw Object.assign(new Error("El email ya está registrado"), { status: 409 });
@@ -44,10 +44,8 @@ export async function registrarConPassword(
     });
     return await crearSesionCompleta(usuario, { dispositivo, ip });
   } catch (error) {
-    // ✅ Re-lanzar errores que ya tienen status (propios o de negocio)
     if (error.status) throw error;
 
-    // Manejar duplicado de DB por si la verificación previa tuvo race condition
     if (error.code === "23505") {
       throw Object.assign(new Error("El email ya está registrado"), { status: 409 });
     }
@@ -61,7 +59,6 @@ export async function registrarConPassword(
 
 // ── Email + Password (login) ──────────────────────────────────────────
 export async function loginConPassword({ email, password, dispositivo, ip }) {
-  // ✅ Validaciones de campos vacíos/nulos a nivel de servicio
   if (!email || typeof email !== "string" || !email.trim()) {
     throw Object.assign(new Error("El email es requerido"), { status: 400 });
   }
@@ -70,17 +67,11 @@ export async function loginConPassword({ email, password, dispositivo, ip }) {
   }
 
   try {
-    // 1. Verificar que el usuario exista
     const usuario = await UsuarioModel.findByEmail(email.trim().toLowerCase());
     if (!usuario) {
-      // ✅ Mensaje genérico para no revelar si el email existe o no (seguridad)
-      throw Object.assign(
-        new Error("Email o contraseña incorrectos"),
-        { status: 401 }
-      );
+      throw Object.assign(new Error("Email o contraseña incorrectos"), { status: 401 });
     }
 
-    // 2. Verificar que tenga provider de password
     const authProvider = await AuthProviderModel.findByUserAndProvider(usuario.id, "password");
     if (!authProvider?.password_hash) {
       throw Object.assign(
@@ -89,16 +80,11 @@ export async function loginConPassword({ email, password, dispositivo, ip }) {
       );
     }
 
-    // 3. Verificar contraseña
     const valido = await bcrypt.compare(password, authProvider.password_hash);
     if (!valido) {
-      throw Object.assign(
-        new Error("Email o contraseña incorrectos"),
-        { status: 401 }
-      );
+      throw Object.assign(new Error("Email o contraseña incorrectos"), { status: 401 });
     }
 
-    // 4. Verificar que la cuenta esté activa
     if (usuario.activo === false) {
       throw Object.assign(
         new Error("Tu cuenta ha sido desactivada. Contacta con soporte."),
@@ -106,19 +92,15 @@ export async function loginConPassword({ email, password, dispositivo, ip }) {
       );
     }
 
-    // 5. Actualizar último login
     await db.query(
       "UPDATE usuarios SET ultimo_login = NOW(), ultimo_acceso = NOW() WHERE id = $1",
       [usuario.id]
     );
 
     return await crearSesionCompleta(usuario, { dispositivo, ip });
-
   } catch (error) {
-    // ✅ CRÍTICO: re-lanzar errores con status propio sin envolverlos en 500
     if (error.status) throw error;
 
-    // Solo errores inesperados llegan aquí
     throw Object.assign(
       new Error("Error interno al iniciar sesión"),
       { status: 500 }
@@ -149,4 +131,96 @@ export async function logoutAllDevices(usuarioId) {
   } catch {
     throw Object.assign(new Error("Error al cerrar sesiones"), { status: 500 });
   }
+}
+
+// ── Recuperación de contraseña ────────────────────────────────────────
+export async function forgotPassword(email) {
+  const usuario = await UsuarioModel.findByEmail(email.trim().toLowerCase());
+
+  if (!usuario) {
+    return { success: true, message: "Si el correo existe, se enviará un enlace" };
+  }
+
+  const authProvider = await AuthProviderModel.findByUserAndProvider(usuario.id, "password");
+  if (!authProvider) {
+    return { success: true, message: "Si el correo existe, se enviará un enlace" };
+  }
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = await bcrypt.hash(rawToken, 10);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
+
+  await db.query(
+    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+    [usuario.id, tokenHash, expiresAt]
+  );
+
+  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`;
+  await sendResetPasswordEmail(usuario.email, resetLink);
+
+  return { success: true, message: "Si el correo existe, se enviará un enlace" };
+}
+
+// ── Resetear contraseña ───────────────────────────────────────────────
+export async function resetPassword(token, newPassword) {
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    throw Object.assign(
+      new Error("La contraseña debe tener al menos 6 caracteres"),
+      { status: 400 }
+    );
+  }
+
+  const result = await db.query(
+    `SELECT * FROM password_reset_tokens WHERE used = FALSE AND expires_at > NOW() ORDER BY created_at DESC`
+  );
+
+  let validToken = null;
+  for (const row of result.rows) {
+    const valid = await bcrypt.compare(token, row.token_hash);
+    if (valid) {
+      validToken = row;
+      break;
+    }
+  }
+
+  if (!validToken) {
+    throw Object.assign(new Error("Token inválido o expirado"), { status: 400 });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+
+  await db.query(
+    `UPDATE auth_providers SET password_hash = $1, updated_at = NOW() WHERE user_id = $2 AND provider = 'password'`,
+    [passwordHash, validToken.user_id]
+  );
+
+  await db.query(
+    `UPDATE password_reset_tokens SET used = TRUE WHERE id = $1`,
+    [validToken.id]
+  );
+
+  await revocarTodosLosTokens(validToken.user_id);
+
+  return { success: true, message: "Contraseña actualizada correctamente" };
+}
+
+// ── Set password para usuario OAuth ✅ NUEVO ──────────────────────────
+export async function setPasswordForOAuthUser(userId, password) {
+  const existingProvider = await AuthProviderModel.findByUserAndProvider(userId, "password");
+
+  if (existingProvider) {
+    throw Object.assign(
+      new Error("El usuario ya tiene contraseña"),
+      { status: 400 }
+    );
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  await db.query(
+    `INSERT INTO auth_providers (user_id, provider, password_hash) VALUES ($1, 'password', $2)`,
+    [userId, passwordHash]
+  );
+
+  return { success: true, message: "Contraseña creada correctamente" };
 }

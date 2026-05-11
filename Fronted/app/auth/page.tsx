@@ -16,7 +16,7 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login, register, loginWithGoogle, loginWithGithub } = useAuth();
+  const { login, register, loginWithGoogle, loginWithGithub, resetPassword } = useAuth();
   const router = useRouter();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -163,6 +163,7 @@ export default function AuthPage() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">
                 Contraseña
               </label>
+                      
               <input
                 id="password"
                 name="password"
@@ -173,6 +174,36 @@ export default function AuthPage() {
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-[#00ff00] transition-colors"
                 placeholder="••••••••"
               />
+            
+              {/* ✅ OLVIDÉ MI CONTRASEÑA */}
+              {isLogin && (
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!formData.email) {
+                        setError('Primero ingresa tu correo electrónico');
+                        return;
+                      }
+                    
+                      try {
+                        setLoading(true);
+                      
+                        await resetPassword(formData.email);
+                      
+                        alert('Se envió un correo para recuperar tu contraseña');
+                      } catch (err: any) {
+                        setError(err.message);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="text-sm text-[#00ff00] hover:text-[#00cc00] transition-colors"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
+              )}
             </div>
 
             {!isLogin && (

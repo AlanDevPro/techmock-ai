@@ -19,16 +19,151 @@ const GithubIcon = () => (
   </svg>
 );
 
+const PasswordIcon = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+// ── Modal para crear contraseña ───────────────────────────────────────
+interface SetPasswordModalProps {
+  onClose: () => void;
+  onSuccess: () => void;
+  accessToken: string;
+}
+
+function SetPasswordModal({ onClose, onSuccess, accessToken }: SetPasswordModalProps) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    setError('');
+
+    if (password.length < 6) {
+      return setError('La contraseña debe tener al menos 6 caracteres');
+    }
+    if (password !== confirm) {
+      return setError('Las contraseñas no coinciden');
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('http://localhost:4000/api/v1/auth/set-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al crear la contraseña');
+      }
+
+      onSuccess();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error inesperado');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    // Backdrop
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      {/* Panel */}
+      <div
+        className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm mx-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-white font-semibold text-base">Crear contraseña</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-300 transition-colors text-xl leading-none"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p className="text-gray-400 text-sm mb-5">
+          Crea una contraseña para poder iniciar sesión también con tu email.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Nueva contraseña</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-gray-500 transition-colors"
+            />
+          </div>
+
+          <div>
+            <label className="text-gray-400 text-xs mb-1 block">Confirmar contraseña</label>
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Repite la contraseña"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-gray-500 transition-colors"
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            />
+          </div>
+
+          {error && (
+            <p className="text-red-400 text-xs">{error}</p>
+          )}
+        </div>
+
+        <div className="flex gap-2 mt-5">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-800 text-gray-300 py-2 px-3 rounded-lg text-sm font-medium hover:bg-gray-700 transition-colors border border-gray-700"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="flex-1 bg-white text-black py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Guardando...' : 'Crear contraseña'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Panel principal ───────────────────────────────────────────────────
 export default function LinkAccountsPanel() {
   const { user, linkGithubToCurrentUser, linkGoogleToCurrentUser } = useAuth();
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const providers = user?.providers ?? [];
   const hasGoogle = providers.includes('google.com');
   const hasGithub = providers.includes('github.com');
   const hasPassword = providers.includes('password');
-  const allLinked = hasGoogle && hasGithub;
+  const allLinked = hasGoogle && hasGithub && hasPassword;
+
+  // Obtener el accessToken desde donde lo guardes (localStorage, contexto, etc.)
+  const accessToken =
+    typeof window !== 'undefined' ? localStorage.getItem('accessToken') ?? '' : '';
 
   const notify = (msg: string, isError = false) => {
     isError ? setError(msg) : setSuccess(msg);
@@ -40,11 +175,7 @@ export default function LinkAccountsPanel() {
       await linkGithubToCurrentUser();
       notify('✅ GitHub vinculado correctamente');
     } catch (e: unknown) {
-      if (e instanceof Error) {
-        notify(e.message, true);
-      } else {
-        notify('Ocurrió un error inesperado', true);
-      }
+      notify(e instanceof Error ? e.message : 'Ocurrió un error inesperado', true);
     }
   };
 
@@ -53,53 +184,73 @@ export default function LinkAccountsPanel() {
       await linkGoogleToCurrentUser();
       notify('✅ Google vinculado correctamente');
     } catch (e: unknown) {
-      if (e instanceof Error) {
-        notify(e.message, true);
-      } else {
-        notify('Ocurrió un error inesperado', true);
-      }
+      notify(e instanceof Error ? e.message : 'Ocurrió un error inesperado', true);
     }
   };
 
+  const handlePasswordSuccess = () => {
+    setShowPasswordModal(false);
+    notify('✅ Contraseña creada correctamente');
+    // Si tu AuthContext expone una función para refrescar el usuario, llámala aquí:
+    // refreshUser();
+  };
+
   return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
-      <h3 className="text-white font-semibold mb-4">Vincular Cuentas</h3>
+    <>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+        <h3 className="text-white font-semibold mb-4">Vincular Cuentas</h3>
 
-      {success && (
-        <p className="text-green-400 text-xs mb-3">{success}</p>
-      )}
-      {error && (
-        <p className="text-red-400 text-xs mb-3">{error}</p>
-      )}
+        {success && <p className="text-green-400 text-xs mb-3">{success}</p>}
+        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
 
-      <div className="space-y-3">
-        {allLinked ? (
-          <p className="text-gray-500 text-sm text-center py-2">
-            ✅ Todas las cuentas vinculadas
-          </p>
-        ) : (
-          <>
-            {!hasGoogle && (
-              <button
-                onClick={handleLinkGoogle}
-                className="w-full flex items-center justify-center gap-2 bg-white text-black py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-100 transition-colors"
-              >
-                <GoogleIcon />
-                Vincular con Google
-              </button>
-            )}
-            {!hasGithub && (
-              <button
-                onClick={handleLinkGithub}
-                className="w-full flex items-center justify-center gap-2 bg-gray-800 text-white py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-700 transition-colors border border-gray-700"
-              >
-                <GithubIcon />
-                Vincular con GitHub
-              </button>
-            )}
-          </>
-        )}
+        <div className="space-y-3">
+          {allLinked ? (
+            <p className="text-gray-500 text-sm text-center py-2">
+              ✅ Todas las cuentas vinculadas
+            </p>
+          ) : (
+            <>
+              {!hasGoogle && (
+                <button
+                  onClick={handleLinkGoogle}
+                  className="w-full flex items-center justify-center gap-2 bg-white text-black py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-100 transition-colors"
+                >
+                  <GoogleIcon />
+                  Vincular con Google
+                </button>
+              )}
+
+              {!hasGithub && (
+                <button
+                  onClick={handleLinkGithub}
+                  className="w-full flex items-center justify-center gap-2 bg-gray-800 text-white py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-700 transition-colors border border-gray-700"
+                >
+                  <GithubIcon />
+                  Vincular con GitHub
+                </button>
+              )}
+
+              {!hasPassword && (
+                <button
+                  onClick={() => setShowPasswordModal(true)}
+                  className="w-full flex items-center justify-center gap-2 bg-gray-800 text-white py-2 px-3 rounded-lg text-sm font-semibold hover:bg-gray-700 transition-colors border border-gray-700"
+                >
+                  <PasswordIcon />
+                  Vincular con contraseña
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+
+      {showPasswordModal && (
+        <SetPasswordModal
+          onClose={() => setShowPasswordModal(false)}
+          onSuccess={handlePasswordSuccess}
+          accessToken={accessToken}
+        />
+      )}
+    </>
   );
 }

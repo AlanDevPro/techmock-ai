@@ -49,6 +49,9 @@ export const verifyToken = async (req, res, next) => {
       rol: usuario.rol,
     };
 
+
+    console.log("🔐 AUTH USER:", req.usuario);
+
     next();
   } catch (error) {
     if (error.name === "TokenExpiredError") {
