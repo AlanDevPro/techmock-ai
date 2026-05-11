@@ -131,3 +131,204 @@ Firebase ya está configurado y listo para usar. Las credenciales están incluid
 ---
 
 Desarrollado con ❤️ usando Next.js y Firebase
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+app/
+│
+├── (public)/
+│   ├── page.tsx
+│   └── auth/
+│
+├── (protected)/
+│   ├── dashboard/
+│   │   ├── page.tsx
+│   │   ├── admin/
+│   │   │   ├── page.tsx
+│   │   │   ├── users/
+│   │   │   ├── interviews/
+│   │   │   ├── analytics/
+│   │   │   └── recruitment/
+│   │   │
+│   │   └── user/
+│   │       ├── page.tsx
+│   │       ├── profile/
+│   │       ├── interviews/
+│   │       ├── progress/
+│   │       └── rankings/
+│   │
+│   ├── ide/
+│   └── profile/
+│
+├── layout.tsx
+└── globals.css
+
+
+
+
+
+
+components/
+│
+├── ui/                         # Componentes UI reutilizables
+│   ├── button/
+│   │   ├── Button.tsx
+│   │   └── index.ts
+│   │
+│   ├── modal/
+│   ├── input/
+│   ├── textarea/
+│   ├── select/
+│   ├── card/
+│   ├── table/
+│   ├── badge/
+│   ├── avatar/
+│   ├── dropdown/
+│   ├── tabs/
+│   ├── loader/
+│   ├── toast/
+│   ├── tooltip/
+│   ├── pagination/
+│   └── index.ts
+│
+├── layout/                     # Layout global
+│   ├── Header.tsx
+│   ├── Footer.tsx
+│   ├── Sidebar.tsx
+│   ├── DashboardSidebar.tsx
+│   ├── MobileSidebar.tsx
+│   ├── Topbar.tsx
+│   └── index.ts
+│
+├── auth/                       # Auth module
+│   ├── LoginForm.tsx
+│   ├── RegisterForm.tsx
+│   ├── SocialLoginButtons.tsx
+│   ├── ProtectedRoute.tsx
+│   ├── RoleGuard.tsx
+│   ├── AuthProviderButtons.tsx
+│   └── index.ts
+│
+├── dashboard/                  # Dashboard compartido
+│   ├── DashboardStats.tsx
+│   ├── WelcomeBanner.tsx
+│   ├── RecentActivity.tsx
+│   ├── NotificationsPanel.tsx
+│   └── index.ts
+│
+├── developer/                  # TODO lo del developer
+│   ├── profile/
+│   │   ├── ProfileCard.tsx
+│   │   ├── EditProfileForm.tsx
+│   │   ├── SocialLinks.tsx
+│   │   └── AvatarUploader.tsx
+│   │
+│   ├── interviews/
+│   │   ├── InterviewCard.tsx
+│   │   ├── InterviewHistory.tsx
+│   │   ├── InterviewFeedback.tsx
+│   │   ├── InterviewScore.tsx
+│   │   └── Timer.tsx
+│   │
+│   ├── progress/
+│   │   ├── ProgressChart.tsx
+│   │   ├── TechnologyStats.tsx
+│   │   ├── StreakCard.tsx
+│   │   └── RankingCard.tsx
+│   │
+│   ├── rankings/
+│   │   ├── RankingTable.tsx
+│   │   ├── TopDevelopers.tsx
+│   │   └── RankingFilters.tsx
+│   │
+│   ├── ide/
+│   │   ├── EditorPanel.tsx
+│   │   ├── OutputPanel.tsx
+│   │   ├── PreviewPanel.tsx
+│   │   ├── FileExplorer.tsx
+│   │   ├── EditorTabs.tsx
+│   │   ├── RunButton.tsx
+│   │   ├── StatusBar.tsx
+│   │   ├── TopBar.tsx
+│   │   ├── LanguageSelector.tsx
+│   │   ├── ConsolePanel.tsx
+│   │   └── TestResults.tsx
+│   │
+│   └── index.ts
+│
+├── admin/                      # TODO admin separado
+│   ├── developers/
+│   │   ├── DevelopersTable.tsx
+│   │   ├── DeveloperDetails.tsx
+│   │   ├── DeveloperStats.tsx
+│   │   └── DeveloperFilters.tsx
+│   │
+│   ├── interviews/
+│   │   ├── InterviewTable.tsx
+│   │   ├── InterviewAnalytics.tsx
+│   │   ├── EvaluationPanel.tsx
+│   │   └── RubricManager.tsx
+│   │
+│   ├── analytics/
+│   │   ├── AnalyticsCharts.tsx
+│   │   ├── UsageStats.tsx
+│   │   ├── PerformanceMetrics.tsx
+│   │   └── TechnologyUsage.tsx
+│   │
+│   ├── recruitment/
+│   │   ├── RecruitmentTable.tsx
+│   │   ├── ContactDeveloperModal.tsx
+│   │   ├── CandidateCard.tsx
+│   │   └── RecruitmentStatus.tsx
+│   │
+│   ├── technologies/
+│   │   ├── TechnologyTable.tsx
+│   │   ├── CreateTechnologyForm.tsx
+│   │   └── EditTechnologyModal.tsx
+│   │
+│   ├── questions/
+│   │   ├── QuestionEditor.tsx
+│   │   ├── QuestionTable.tsx
+│   │   ├── RubricEditor.tsx
+│   │   └── DifficultySelector.tsx
+│   │
+│   └── index.ts
+│
+├── charts/                     # gráficos globales
+│   ├── LineChart.tsx
+│   ├── PieChart.tsx
+│   ├── RadarChart.tsx
+│   └── BarChart.tsx
+│
+├── notifications/
+│   ├── NotificationBell.tsx
+│   ├── NotificationDropdown.tsx
+│   └── NotificationItem.tsx
+│
+├── shared/                     # Compartidos del negocio
+│   ├── UserCard.tsx
+│   ├── EmptyState.tsx
+│   ├── ErrorState.tsx
+│   ├── LoadingScreen.tsx
+│   ├── ConfirmDialog.tsx
+│   ├── SearchBar.tsx
+│   └── DataTable.tsx
+│
+└── index.ts
+

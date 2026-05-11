@@ -23,6 +23,7 @@ export interface AppUser {
   name: string;
   nombre?: string;
   apellido?: string;
+  rol: 'admin' | 'developer';
   providers: string[]; // ['google.com', 'github.com', 'password']
 }
 
@@ -52,14 +53,20 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
 function decodeJWT(token: string): Omit<AppUser, 'providers'> | null {
   try {
     const payload = token.split('.')[1];
-    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    );
+
     if (!decoded?.sub && !decoded?.id) return null;
+
     return {
       id: decoded.sub ?? decoded.id,
       email: decoded.email ?? '',
       name: decoded.name ?? decoded.nombre ?? '',
       nombre: decoded.nombre ?? decoded.name ?? '',
       apellido: decoded.apellido ?? '',
+      rol: decoded.rol ?? 'developer',
     };
   } catch {
     return null;
