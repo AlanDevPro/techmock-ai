@@ -20,4 +20,48 @@ export const EvaluacionModel = {
     `, [sesionId, puntajeTotal, feedbackGeneral, fortalezas,AreasMejora, sugerenciasRecursos, modeloIaUsado, tokensEvaluacion]);
     return result.rows[0];
   },
+
+  async getAllAnalytics() {
+  const result = await db.query(`
+    SELECT
+      e.id,
+      e.sesion_id,
+
+      e.puntaje_total::float,
+      e.feedback_general,
+      e.fortalezas,
+      e.areas_mejora,
+      e.sugerencias_recursos,
+
+      e.generado_por_ia,
+      e.modelo_ia_usado,
+      e.tokens_evaluacion,
+
+      e.fecha,
+
+      u.nombre,
+      u.apellido,
+
+      t.nombre AS tecnologia,
+      n.nombre AS nivel
+
+    FROM evaluaciones e
+
+    JOIN sesiones_entrevista s
+      ON s.id = e.sesion_id
+
+    JOIN usuarios u
+      ON u.id = s.usuario_id
+
+    JOIN tecnologias t
+      ON t.id = s.tecnologia_id
+
+    JOIN niveles_dificultad n
+      ON n.id = s.nivel_id
+
+    ORDER BY e.fecha DESC
+  `);
+
+  return result.rows;
+},
 };

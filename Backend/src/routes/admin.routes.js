@@ -25,6 +25,10 @@ import { validate } from "../middlewares/validate.middleware.js";
 import { preguntaSchema, updatePreguntaSchema } from "../validators/pregunta.validator.js";
 import { contactoSchema } from "../validators/contacto.validator.js";
 
+import {
+  getEvaluacionesAnalytics
+} from "../controllers/admin.controller.js";
+
 const router = Router();
 
 // Todas las rutas admin requieren token válido + rol admin
@@ -54,5 +58,8 @@ router.delete("/preguntas/:id", eliminarPregunta);
 router.get("/rubricas",       getRubricas);
 router.post("/rubricas",      crearRubrica);
 router.patch("/rubricas/:id", actualizarRubrica);
+
+// ── Evaluaciones ──────────────────────────────────────────────────────────────────
+router.get("/evaluaciones", getEvaluacionesAnalytics);
 
 export default router;
