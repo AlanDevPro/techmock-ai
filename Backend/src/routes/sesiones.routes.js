@@ -5,6 +5,7 @@ import {
   getSesion,
   finalizarSesion,
   getHistorial,
+  getHistorialGlobal,
 } from "../controllers/sesionEntrevista.controller.js";
 import {
   getMensajes,
@@ -30,6 +31,9 @@ router.use(verifyToken);
 // IMPORTANTE: /historial debe ir ANTES de /:id para evitar conflicto de rutas
 // GET  /api/v1/sesiones/historial
 router.get("/historial", getHistorial);
+
+// GET  /api/v1/sesiones/admin/historial
+router.get("/admin/historial", getHistorialGlobal);
 
 // POST /api/v1/sesiones
 router.post("/", iaLimiter, validate(crearSesionSchema), crearSesion);

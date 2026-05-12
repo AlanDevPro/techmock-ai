@@ -35,18 +35,6 @@ interface Usuario {
   puntaje_promedio?: number | null;
 }
 
-// ─── Mock data (reemplaza con: const { data } = await fetch("/api/admin/users")) ─
-
-const MOCK_USERS: Usuario[] = [
-  { id: "u1", nombre: "Ana",    apellido: "Martínez",  email: "ana@dev.io",     rol: "developer",  avatar_url: null, github_url: "https://github.com/ana",    linkedin_url: null, telefono: "+591 71234567", activo: true,  email_verificado: true,  fecha_creacion: "2024-11-10T09:00:00Z", ultimo_login: "2025-05-09T14:22:00Z", provider: "github",   total_entrevistas: 12, puntaje_promedio: 82.4 },
-  { id: "u2", nombre: "Carlos", apellido: "López",     email: "carlos@dev.io",  rol: "developer",  avatar_url: null, github_url: null,                         linkedin_url: "https://linkedin.com/in/carlos", telefono: null, activo: true, email_verificado: false, fecha_creacion: "2024-12-03T11:30:00Z", ultimo_login: "2025-05-08T09:10:00Z", provider: "password", total_entrevistas: 7,  puntaje_promedio: 64.1 },
-  { id: "u3", nombre: "María",  apellido: "Torres",    email: "maria@dev.io",   rol: "developer",  avatar_url: null, github_url: "https://github.com/maria",  linkedin_url: "https://linkedin.com/in/maria", telefono: "+591 79876543", activo: true, email_verificado: true, fecha_creacion: "2025-01-15T08:00:00Z", ultimo_login: "2025-05-07T16:45:00Z", provider: "google",   total_entrevistas: 5,  puntaje_promedio: 71.0 },
-  { id: "u4", nombre: "Diego",  apellido: "Ruiz",      email: "diego@dev.io",   rol: "developer",  avatar_url: null, github_url: "https://github.com/diego",  linkedin_url: null, telefono: null, activo: true, email_verificado: true, fecha_creacion: "2025-02-20T10:00:00Z", ultimo_login: "2025-05-09T11:00:00Z", provider: "github",   total_entrevistas: 18, puntaje_promedio: 89.7 },
-  { id: "u5", nombre: "Sofía",  apellido: "Vega",      email: "sofia@dev.io",   rol: "developer",  avatar_url: null, github_url: null,                         linkedin_url: null, telefono: "+591 76543210", activo: false, email_verificado: true, fecha_creacion: "2025-03-01T07:30:00Z", ultimo_login: "2025-04-10T09:20:00Z", provider: "password", total_entrevistas: 3,  puntaje_promedio: null },
-  { id: "u6", nombre: "Tomás",  apellido: "Bravo",     email: "tomas@dev.io",   rol: "developer",  avatar_url: null, github_url: "https://github.com/tomas",  linkedin_url: "https://linkedin.com/in/tomas", telefono: null, activo: true, email_verificado: false, fecha_creacion: "2025-03-15T13:00:00Z", ultimo_login: "2025-05-06T18:00:00Z", provider: "google",   total_entrevistas: 9,  puntaje_promedio: 77.3 },
-  { id: "u7", nombre: "Laura",  apellido: "Sánchez",   email: "laura@hr.io",    rol: "recruiter",  avatar_url: null, github_url: null,                         linkedin_url: "https://linkedin.com/in/laura", telefono: "+591 70000001", activo: true, email_verificado: true, fecha_creacion: "2024-10-01T08:00:00Z", ultimo_login: "2025-05-09T09:00:00Z", provider: "password", total_entrevistas: 0, puntaje_promedio: null },
-  { id: "u8", nombre: "Admin",  apellido: "Principal", email: "admin@dev.io",   rol: "admin",      avatar_url: null, github_url: null,                         linkedin_url: null, telefono: null, activo: true, email_verificado: true, fecha_creacion: "2024-09-01T00:00:00Z", ultimo_login: "2025-05-10T08:00:00Z", provider: "password", total_entrevistas: 0, puntaje_promedio: null },
-];
 
 // ─── Tema (reutiliza el mismo de tu AdminDashboard) ──────────────────────────
 

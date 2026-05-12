@@ -10,6 +10,9 @@ import authRoutes from "./routes/auth.routes.js";
 import usuariosRoutes from "./routes/usuarios.routes.js";
 import authProviderRoutes from "./routes/authProvider.routes.js";
 import adminRoutes from "./routes/admin.routes.js"; // 🔥 NUEVO
+import sesionesRoutes from "./routes/sesiones.routes.js";
+
+
 
 // ── Middlewares ───────────────────────────────────────
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
@@ -75,6 +78,9 @@ app.use("/api/v1/auth/providers", authProviderRoutes);
 
 // 👑 Panel Admin
 app.use("/api/v1/admin", adminRoutes); // 🔥 NUEVO
+
+// 👑 Panel entrevistas
+app.use("/api/v1/sesiones", sesionesRoutes);
 
 // ──────────────────────────────────────────────────────
 // 404 handler
