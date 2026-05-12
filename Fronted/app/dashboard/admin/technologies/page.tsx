@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from "react";
-import { getTecnologias } from "@/services/tecnologias.service";
+import { getTecnologias } from "@/services/technologies.service";
 
 const T = {
   dark: {
