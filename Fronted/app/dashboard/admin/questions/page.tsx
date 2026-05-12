@@ -301,6 +301,7 @@ export default function QuestionsPage() {
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchPreguntas(); }, [fetchPreguntas]);
 
   // ── Acciones ──────────────────────────────────────────────────────────────
