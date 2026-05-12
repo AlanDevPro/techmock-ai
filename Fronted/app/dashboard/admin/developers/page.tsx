@@ -9,7 +9,7 @@
  * Datos mock → reemplaza los fetch() comentados con tus endpoints reales.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 // ─── Tipos (coinciden con tu tabla `usuarios` + join con auth_providers) ────
 
@@ -64,7 +64,12 @@ const C = {
 // ─── Helpers UI ───────────────────────────────────────────────────────────────
 
 const AVATAR_PALETTE = ["#00c96b","#3b82f6","#a855f7","#f59e0b","#ec4899","#14b8a6","#f97316","#8b5cf6"];
-const initials = (u: Usuario) => `${u.nombre[0]}${u.apellido[0]}`.toUpperCase();
+const initials = (u: Usuario) => {
+  const nombre = u.nombre?.[0] ?? "";
+  const apellido = u.apellido?.[0] ?? "";
+
+  return `${nombre}${apellido}`.toUpperCase();
+};
 const avatarColor = (id: string) => AVATAR_PALETTE[id.charCodeAt(1) % AVATAR_PALETTE.length];
 
 const ROL_STYLES: Record<Rol, { bg: string; c: string; label: string }> = {
@@ -240,19 +245,56 @@ function UserModal({ user, onClose, onSave }: { user: Usuario; onClose: () => vo
 type Filter = "todos" | Rol | "inactivo" | "no_verificado";
 
 export default function UsersPage() {
-  const [users, setUsers]         = useState<Usuario[]>(MOCK_USERS);
+  //const [users, setUsers]         = useState<Usuario[]>(MOCK_USERS);
+  const [users, setUsers] = useState<Usuario[]>([]);
   const [search, setSearch]       = useState("");
   const [filter, setFilter]       = useState<Filter>("todos");
   const [sortBy, setSortBy]       = useState<"fecha" | "nombre" | "puntaje">("fecha");
   const [selected, setSelected]   = useState<Usuario | null>(null);
   const [showNew, setShowNew]     = useState(false);
 
-  // Fetch real → descomentar y borrar MOCK_USERS
-  // useEffect(() => {
-  //   fetch("/api/admin/users")
-  //     .then(r => r.json())
-  //     .then(data => setUsers(data));
-  // }, []);
+  
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const token = localStorage.getItem("accessToken");
+
+        const response = await fetch(
+          "http://localhost:4000/api/v1/admin/usuarios",
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        // Si el token expiró o no existe
+        if (!response.ok) {
+          throw new Error(`Error HTTP: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        console.log("Usuarios recibidos:", result);
+
+        // Tu backend responde:
+        // { success: true, data: [...] }
+
+        if (result.success) {
+          setUsers(result.data);
+        }
+
+      } catch (error) {
+        console.error("Error cargando usuarios:", error);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+
 
   const filtered = useMemo(() => {
     let res = [...users];

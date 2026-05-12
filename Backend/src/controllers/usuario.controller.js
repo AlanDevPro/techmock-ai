@@ -1,5 +1,6 @@
 // controllers/usuario.controller.js
 import { UsuarioModel } from "../models/usuario.model.js";
+import { db } from "../config/database.js";
 
 // GET /api/v1/usuarios/perfil
 export const getMiPerfil = async (req, res, next) => {
@@ -44,14 +45,14 @@ export const updateMiPerfil = async (req, res, next) => {
 export const getUsuarioById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const usuario = await UsuarioModel.findById(parseInt(id));
+    const usuario = await UsuarioModel.findById(id);
     
     if (!usuario) {
       return res.status(404).json({ success: false, error: "Usuario no encontrado" });
     }
     
     // Verificar permisos: solo el propio usuario o un admin puede ver el perfil
-    if (req.usuario.id !== parseInt(id) && req.usuario.rol !== 'admin') {
+    if (req.usuario.id !== id && req.usuario.rol !== 'admin') {
       return res.status(403).json({ success: false, error: "No tienes permiso para ver este perfil" });
     }
     
@@ -80,14 +81,14 @@ export const getAllUsuarios = async (req, res, next) => {
 export const getEstadisticasUsuario = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const perfilCompleto = await UsuarioModel.getFullProfile(parseInt(id));
+    const perfilCompleto = await UsuarioModel.getFullProfile(id);
     
     if (!perfilCompleto) {
       return res.status(404).json({ success: false, error: "Usuario no encontrado" });
     }
     
     // Verificar permisos: solo el propio usuario o un admin puede ver estadísticas
-    if (req.usuario.id !== parseInt(id) && req.usuario.rol !== 'admin') {
+    if (req.usuario.id !== id && req.usuario.rol !== 'admin') {
       return res.status(403).json({ success: false, error: "No tienes permiso para ver estas estadísticas" });
     }
     
@@ -109,7 +110,7 @@ export const updateUsuarioByAdmin = async (req, res, next) => {
     }
     
     // No permitir que un admin se desactive a sí mismo o cambie su propio rol
-    if (req.usuario.id === parseInt(id)) {
+    if (req.usuario.id === id) {
       return res.status(400).json({ 
         success: false, 
         error: "No puedes modificar tu propio rol o estado a través de esta ruta" 
@@ -146,7 +147,7 @@ export const deleteUsuario = async (req, res, next) => {
     }
     
     // No permitir eliminar a sí mismo
-    if (req.usuario.id === parseInt(id)) {
+    if (req.usuario.id === id) {
       return res.status(400).json({ 
         success: false, 
         error: "No puedes eliminar tu propia cuenta" 

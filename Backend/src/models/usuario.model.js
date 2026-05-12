@@ -171,19 +171,50 @@ export const UsuarioModel = {
   async getAllDevelopers() {
     const result = await db.query(`
       SELECT
-        u.id, u.nombre, u.apellido, u.email, u.avatar_url,
-        u.github_url, u.linkedin_url, u.activo, u.fecha_creacion, u.ultimo_login,
-        e.total_entrevistas, e.entrevistas_finalizadas,
-        e.puntaje_promedio, e.mejor_puntaje, e.racha_maxima,
-        t.nombre AS tecnologia_favorita
+        u.id,
+        u.nombre,
+        u.apellido,
+        u.email,
+        u.rol,
+        u.avatar_url,
+        u.github_url,
+        u.linkedin_url,
+        u.telefono,
+        u.activo,
+        u.email_verificado,
+        u.fecha_creacion,
+        u.ultimo_login,
+
+        COALESCE(
+          ARRAY_AGG(DISTINCT ap.provider)
+          FILTER (WHERE ap.provider IS NOT NULL),
+          '{}'
+        ) AS providers,
+
+        e.total_entrevistas,
+        e.puntaje_promedio
+
       FROM usuarios u
-      LEFT JOIN estadisticas_usuario e ON e.usuario_id = u.id
-      LEFT JOIN tecnologias t ON t.id = e.tecnologia_favorita_id
-      WHERE u.rol = 'developer'
+
+      LEFT JOIN auth_providers ap
+        ON ap.user_id = u.id
+
+      LEFT JOIN estadisticas_usuario e
+        ON e.usuario_id = u.id
+
+      GROUP BY
+        u.id,
+        e.total_entrevistas,
+        e.puntaje_promedio
+
       ORDER BY u.fecha_creacion DESC
     `);
+
     return result.rows;
   },
+
+
+
 
   async getFullProfile(id) {
     const result = await db.query(`
