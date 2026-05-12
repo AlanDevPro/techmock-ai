@@ -1,22 +1,15 @@
 // src/app.js
-
 import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import helmet from "helmet";
+import cors    from "cors";
+import dotenv  from "dotenv";
+import helmet  from "helmet";
 
-// ── Routes ────────────────────────────────────────────
-import authRoutes from "./routes/auth.routes.js";
-import usuariosRoutes from "./routes/usuarios.routes.js";
-import authProviderRoutes from "./routes/authProvider.routes.js";
-import adminRoutes from "./routes/admin.routes.js"; // 🔥 NUEVO
-import sesionesRoutes from "./routes/sesiones.routes.js";
-
-
+// 🔥 Un solo import para TODAS las rutas
+import apiRoutes from "./routes/index.routes.js";
 
 // ── Middlewares ───────────────────────────────────────
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
-import { errorHandler } from "./middlewares/errorHandler.middleware.js";
+import { errorHandler }   from "./middlewares/errorHandler.middleware.js";
 
 dotenv.config();
 
@@ -50,37 +43,22 @@ app.use("/api/v1", generalLimiter);
 // Health checks
 // ──────────────────────────────────────────────────────
 
-app.get("/", (req, res) => {
-  res.send("API running 🚀");
-});
+app.get("/", (_req, res) => res.send("API running 🚀"));
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) =>
   res.json({
     success: true,
     status: "ok",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-  });
-});
+  })
+);
 
 // ──────────────────────────────────────────────────────
-// API Routes
+// API Routes  ← todo queda en una línea
 // ──────────────────────────────────────────────────────
 
-// 🔐 Auth
-app.use("/api/v1/auth", authRoutes);
-
-// 👤 Usuarios autenticados
-app.use("/api/v1/usuarios", usuariosRoutes);
-
-// 🔗 Providers OAuth / Password Linking
-app.use("/api/v1/auth/providers", authProviderRoutes);
-
-// 👑 Panel Admin
-app.use("/api/v1/admin", adminRoutes); // 🔥 NUEVO
-
-// 👑 Panel entrevistas
-app.use("/api/v1/sesiones", sesionesRoutes);
+app.use("/api/v1", apiRoutes);
 
 // ──────────────────────────────────────────────────────
 // 404 handler
@@ -109,10 +87,10 @@ app.listen(PORT, () => {
   console.log(`
 🚀 Server running
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌐 URL: http://localhost:${PORT}
-📦 ENV: ${process.env.NODE_ENV || "development"}
+🌐 URL:  http://localhost:${PORT}
+📦 ENV:  ${process.env.NODE_ENV || "development"}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`);
+  `);
 });
 
 export default app;
