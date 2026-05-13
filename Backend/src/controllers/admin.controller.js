@@ -70,13 +70,13 @@ export const contactarDeveloper = async (req, res, next) => {
       mensaje,
     });
 
-    // Notificar al developer
+    // ✅ Notificar al developer automáticamente
     await NotificacionModel.create({
       usuarioId: developer_id,
-      tipo:      "reclutamiento",
-      titulo:    "Tienes un nuevo mensaje de reclutamiento",
-      mensaje:   asunto,
-      urlAccion: `/reclutamiento/${contacto.id}`,
+      tipo: "info",
+      titulo: "Nuevo contacto de reclutamiento",
+      mensaje: `Has recibido un mensaje de reclutamiento: ${asunto}`,
+      urlAccion: "/dashboard/developer/recruitment"
     });
 
     res.status(201).json({ success: true, data: contacto });

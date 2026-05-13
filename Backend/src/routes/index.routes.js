@@ -22,6 +22,8 @@ import adminRoutes       from "./admin.routes.js";         // /admin/preguntas, 
 // ── Otros ─────────────────────────────────────────────────────────────────
 import notificacionesRoutes from "./notificaciones.routes.js";
 
+import dashboardRoutes from "./dashboard.routes.js";
+
 const router = Router();
 
 // 🔐 Auth
@@ -46,5 +48,8 @@ router.use("/admin",           adminRoutes);
 
 // 🔔 Notificaciones
 router.use("/notificaciones",  notificacionesRoutes);
+
+// 📊 Dashboard
+router.use("/dashboard", dashboardRoutes);
 
 export default router;
