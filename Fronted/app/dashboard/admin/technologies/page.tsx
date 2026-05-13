@@ -258,10 +258,7 @@ export default function TechnologiesPage() {
                   : `${techs.filter(t => t.activo).length} activas · ${techs.filter(t => !t.activo).length} inactivas`}
             </p>
           </div>
-          <button onClick={() => setShowModal(true)}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 10, border: "none", background: t.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-            <i className="ti ti-plus" style={{ fontSize: 16 }} /> Nueva tecnología
-          </button>
+          
         </div>
 
         {/* Stats */}

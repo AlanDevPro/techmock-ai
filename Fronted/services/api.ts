@@ -9,9 +9,7 @@ const IS_LOCAL =
   window.location.hostname === "localhost";
 
 // IDE separado
-export const IDE_API_URL = IS_LOCAL
-  ? "http://localhost:3000"
-  : "https://92b0-181-188-158-242.ngrok-free.app";
+
 
 // Backend principal
 export const BACKEND_API_URL = IS_LOCAL
@@ -30,34 +28,7 @@ function getAuthToken() {
 // IDE / EJECUCIÓN DE CÓDIGO
 // ─────────────────────────────────────────────
 
-export async function runCode(
-  code: string,
-  language: string
-) {
-  const response = await fetch(
-    `${IDE_API_URL}/execution/run`,
-    {
-      method: "POST",
 
-      headers: {
-        "Content-Type": "application/json",
-      },
-
-      body: JSON.stringify({
-        code,
-        language,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      "Error ejecutando código"
-    );
-  }
-
-  return response.json();
-}
 
 // ─────────────────────────────────────────────
 // FETCH GENERAL BACKEND
