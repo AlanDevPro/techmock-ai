@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +19,9 @@ interface ExplorerPanelProps {
   activeFile: string;
   onSelectFile: (file: string) => void;
   files: { [key: string]: string };
+  onFsUpdate: (
+    updater: (prev: { [key: string]: string }) => { [key: string]: string }
+  ) => void;
   onRefresh: () => void;
 }
 
@@ -58,6 +61,7 @@ interface FileTreeProps {
   renaming: string | null;
   onRenameSubmit: (oldPath: string, newName: string) => void;
   onRenameCancel: () => void;
+  deletingPaths: Record<string, boolean>;
 };
 
 const FileTree = ({
@@ -78,11 +82,12 @@ const FileTree = ({
   renaming,
   onRenameSubmit,
   onRenameCancel,
+  deletingPaths = {},
 }: FileTreeProps) => {
-  const toggleFolder = (folderName: string) => {
+  const toggleFolder = (folderPath: string) => {
     setExpandedFolders((prev: Record<string, boolean>) => ({
       ...prev,
-      [folderName]: !prev[folderName],
+      [folderPath]: !prev[folderPath],
     }));
   };
 
@@ -136,13 +141,14 @@ const FileTree = ({
         })
         .map(([key, value]) => {
           const isFolder = typeof value === "object";
-          const isExpanded = expandedFolders[key] !== false;
           const nodePath =
             currentPath === "" ? `/${key}` : `${currentPath}/${key}`;
+          const isExpanded = expandedFolders[nodePath] ?? level === 0;
           const isSelected =
             (!isFolder && activeFile === value) ||
             (isFolder && selectedDir === nodePath);
           const isRenaming = renaming === nodePath;
+          const isDeleting = deletingPaths[nodePath] === true;
 
           return (
             <div key={key}>
@@ -154,6 +160,8 @@ const FileTree = ({
                   color: isSelected
                     ? "var(--text-heading)"
                     : "var(--text-primary)",
+                  opacity: isDeleting ? 0.35 : 1,
+                  transition: "opacity 0.15s ease, background 0.15s ease",
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected)
@@ -169,7 +177,7 @@ const FileTree = ({
                   e.stopPropagation();
                   if (isFolder) {
                     onSelectDir(nodePath);
-                    toggleFolder(key);
+                    toggleFolder(nodePath);
                   } else {
                     onSelectDir(currentPath);
                     onSelectFile(value as string);
@@ -281,6 +289,7 @@ const FileTree = ({
                   renaming={renaming}
                   onRenameSubmit={onRenameSubmit}
                   onRenameCancel={onRenameCancel}
+                  deletingPaths={deletingPaths}
                 />
               )}
             </div>
@@ -294,6 +303,7 @@ export default function ExplorerPanel({
   activeFile,
   onSelectFile,
   files,
+  onFsUpdate,
   onRefresh,
 }: ExplorerPanelProps) {
   const [creating, setCreating] = useState<{
@@ -321,6 +331,7 @@ export default function ExplorerPanel({
     isFolder: boolean;
   } | null>(null);
   const [clipboard, setClipboard] = useState<{ path: string } | null>(null);
+  const [deletingPaths, setDeletingPaths] = useState<Record<string, boolean>>({});
 
   type TreeNode = { [key: string]: TreeNode | string };
 
@@ -347,29 +358,34 @@ export default function ExplorerPanel({
     return root;
   };
 
-  const filePaths = Object.keys(files);
-  const filteredPaths = visibleRoot
-    ? filePaths.filter(
-        (path) =>
-          path === visibleRoot || path.startsWith(`${visibleRoot}/`)
-      )
-    : filePaths;
-  const treeData = buildTree(filteredPaths);
+  const filePaths = useMemo(() => Object.keys(files), [files]);
+  const filteredPaths = useMemo(() => (
+    visibleRoot
+      ? filePaths.filter(
+          (path) =>
+            path === visibleRoot || path.startsWith(`${visibleRoot}/`)
+        )
+      : filePaths
+  ), [filePaths, visibleRoot]);
+  const treeData = useMemo(() => buildTree(filteredPaths), [filteredPaths]);
+
+  useEffect(() => {
+    if (visibleRoot) {
+      setExpandedFolders({ [visibleRoot]: true });
+      setSelectedDir(visibleRoot);
+    }
+  }, [visibleRoot]);
 
   const handleCreateFile = () => {
     if (selectedDir !== "") {
-      const parts = selectedDir.split("/").filter(Boolean);
-      const folderName = parts[parts.length - 1];
-      setExpandedFolders((prev) => ({ ...prev, [folderName]: true }));
+      setExpandedFolders((prev) => ({ ...prev, [selectedDir]: true }));
     }
     setCreating({ type: "file", dir: selectedDir });
   };
 
   const handleCreateFolder = () => {
     if (selectedDir !== "") {
-      const parts = selectedDir.split("/").filter(Boolean);
-      const folderName = parts[parts.length - 1];
-      setExpandedFolders((prev) => ({ ...prev, [folderName]: true }));
+      setExpandedFolders((prev) => ({ ...prev, [selectedDir]: true }));
     }
     setCreating({ type: "folder", dir: selectedDir });
   };
@@ -383,6 +399,11 @@ export default function ExplorerPanel({
     const container = getWebContainer();
     if (container) {
       const fullPath = dir ? `${dir}/${name}` : `/${name}`;
+      if (files[fullPath]) {
+        alert("Ya existe un archivo o carpeta con ese nombre.");
+        setCreating(null);
+        return;
+      }
       try {
         if (type === "file") {
           await container.fs.writeFile(fullPath, "");
@@ -390,7 +411,10 @@ export default function ExplorerPanel({
         } else {
           await container.fs.mkdir(fullPath, { recursive: true });
         }
-        onRefresh();
+        onFsUpdate((prev) => ({
+          ...prev,
+          [fullPath]: type === "folder" ? "DIRECTORY:" : "",
+        }));
       } catch (e) {
         console.error("Error creating item:", e);
       }
@@ -408,8 +432,23 @@ export default function ExplorerPanel({
     const container = getWebContainer();
     if (container) {
       try {
+        setDeletingPaths((prev) => ({ ...prev, [path]: true }));
+        await new Promise((r) => setTimeout(r, 140));
         await container.fs.rm(path, { recursive: true });
-        onRefresh();
+        onFsUpdate((prev) => {
+          const next = { ...prev };
+          Object.keys(next).forEach((key) => {
+            if (key === path || key.startsWith(`${path}/`)) {
+              delete next[key];
+            }
+          });
+          return next;
+        });
+        setDeletingPaths((prev) => {
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
       } catch (e) {
         console.error("Error deleting item", e);
       }
@@ -429,12 +468,33 @@ export default function ExplorerPanel({
     const container = getWebContainer();
     if (container) {
       try {
+        if (files[newPath]) {
+          const overwrite = window.confirm(
+            "Ya existe un archivo/carpeta con ese nombre. ¿Sobrescribir?"
+          );
+          if (!overwrite) {
+            setRenaming(null);
+            return;
+          }
+          await container.fs.rm(newPath, { recursive: true });
+        }
         const process = await container.spawn("jsh", [
           "-c",
           `mv '${oldPath}' '${newPath}'`,
         ]);
         await process.exit;
-        onRefresh();
+        onFsUpdate((prev) => {
+          const next: { [key: string]: string } = {};
+          Object.entries(prev).forEach(([key, value]) => {
+            if (key === oldPath || key.startsWith(`${oldPath}/`)) {
+              const suffix = key.slice(oldPath.length);
+              next[`${newPath}${suffix}`] = value;
+            } else {
+              next[key] = value;
+            }
+          });
+          return next;
+        });
         if (activeFile === oldPath) onSelectFile(newPath);
       } catch (e) {
         console.error("Error renaming", e);
@@ -469,13 +529,23 @@ export default function ExplorerPanel({
           existingItems = items.map((i) => i.name);
         } catch {}
         let finalName = fileName;
-        let counter = 1;
-        while (existingItems.includes(finalName)) {
-          const parts = fileName.split(".");
-          const ext = parts.length > 1 ? "." + parts.pop() : "";
-          const name = parts.join(".");
-          finalName = `${name}_${counter}${ext}`;
-          counter++;
+        if (existingItems.includes(finalName)) {
+          const overwrite = window.confirm(
+            "Ya existe un archivo/carpeta con ese nombre. ¿Sobrescribir?"
+          );
+          if (!overwrite) {
+            let counter = 1;
+            while (existingItems.includes(finalName)) {
+              const parts = fileName.split(".");
+              const ext = parts.length > 1 ? "." + parts.pop() : "";
+              const name = parts.join(".");
+              finalName = `${name}_${counter}${ext}`;
+              counter++;
+            }
+          } else {
+            const toRemove = cleanDest === "/" ? `/${finalName}` : `${cleanDest}/${finalName}`;
+            await container.fs.rm(toRemove, { recursive: true });
+          }
         }
         const finalDest =
           cleanDest === "/" ? `/${finalName}` : `${cleanDest}/${finalName}`;
@@ -484,7 +554,24 @@ export default function ExplorerPanel({
           `cp -r '${clipboard.path}' '${finalDest}'`,
         ]);
         await process.exit;
-        onRefresh();
+        onFsUpdate((prev) => {
+          const next = { ...prev };
+          const source = clipboard.path;
+          const entries = Object.entries(prev).filter(([key]) =>
+            key === source || key.startsWith(`${source}/`)
+          );
+
+          if (entries.length === 0) {
+            next[finalDest] = prev[source] ?? "";
+            return next;
+          }
+
+          for (const [key, value] of entries) {
+            const suffix = key.slice(source.length);
+            next[`${finalDest}${suffix}`] = value;
+          }
+          return next;
+        });
       } catch (e) {
         console.error("Error pasting", e);
       }
@@ -581,6 +668,7 @@ export default function ExplorerPanel({
           renaming={renaming}
           onRenameSubmit={handleRenameSubmit}
           onRenameCancel={() => setRenaming(null)}
+          deletingPaths={deletingPaths}
         />
       </div>
 

@@ -7,10 +7,16 @@ import { useState, useEffect } from "react";
 type Framework = "vuejs" | "nextjs" | null;
 
 interface QuestionData {
+  session_id?: string;
   pregunta_practica: string;
   comprension_a_evaluar: string;
   explicacion_codigo_esperado: string;
   error_por_falta_de_contexto?: string | null;
+  medidor_dificultad?: {
+    nivel: string;
+    puntaje: number;
+    tendencia: string;
+  };
 }
 
 interface QuestionPanelProps {
@@ -34,15 +40,39 @@ export default function QuestionPanel({
     }
   }, [selectedFramework]);
 
+  const getSessionId = (framework: "vuejs" | "nextjs") => {
+    if (typeof window === "undefined") return null;
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("session_id");
+    if (fromUrl) {
+      sessionStorage.setItem(`rag_session_id_${framework}`, fromUrl);
+      return fromUrl;
+    }
+    return sessionStorage.getItem(`rag_session_id_${framework}`);
+  };
+
   const loadQuestions = async (framework: "vuejs" | "nextjs") => {
-    const cacheKey = `question_${framework}`;
+    const sessionId = getSessionId(framework);
+    const baseCacheKey = `question_${framework}`;
+    const cacheKey = sessionId ? `${baseCacheKey}_${sessionId}` : baseCacheKey;
     
     // ✅ 1. Revisar caché primero
-    const cached = sessionStorage.getItem(cacheKey);
+    const cached = sessionStorage.getItem(cacheKey) || (sessionId ? sessionStorage.getItem(baseCacheKey) : null);
     if (cached) {
       try {
         const parsedData = JSON.parse(cached) as QuestionData;
         setQuestionData(parsedData);
+        if (parsedData.session_id && parsedData.medidor_dificultad) {
+          window.dispatchEvent(
+            new CustomEvent("question-loaded", {
+              detail: {
+                framework,
+                session_id: parsedData.session_id,
+                medidor: parsedData.medidor_dificultad,
+              },
+            })
+          );
+        }
         return;
       } catch (err) {
         console.error("Error parsing cached data:", err);
@@ -55,12 +85,37 @@ export default function QuestionPanel({
     setError(null);
     
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/generar-preguntas/${endpoint}`);
+      const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+      const response = await fetch(`http://127.0.0.1:8000/api/generar-preguntas/${endpoint}${query}`);
       if (!response.ok) throw new Error("No se pudo obtener las preguntas");
       const data = await response.json();
-      
-      // ✅ 2. Guardar en caché
-      sessionStorage.setItem(cacheKey, JSON.stringify(data));
+
+      if (data.session_id) {
+        sessionStorage.setItem(`rag_session_id_${framework}`, data.session_id);
+      }
+
+      // ✅ 2. Guardar en caché (clave base y, si existe, clave con session_id)
+      sessionStorage.setItem(baseCacheKey, JSON.stringify(data));
+      if (data.session_id) {
+        sessionStorage.setItem(`${baseCacheKey}_${data.session_id}`, JSON.stringify(data));
+      }
+
+      if (data.session_id && data.medidor_dificultad) {
+        const metaKey = `question_meta_${framework}_${data.session_id}`;
+        sessionStorage.setItem(metaKey, JSON.stringify({
+          medidor: data.medidor_dificultad,
+          timestamp: Date.now(),
+        }));
+        window.dispatchEvent(
+          new CustomEvent("question-loaded", {
+            detail: {
+              framework,
+              session_id: data.session_id,
+              medidor: data.medidor_dificultad,
+            },
+          })
+        );
+      }
       
       setQuestionData(data);
     } catch (err) {
@@ -73,9 +128,11 @@ export default function QuestionPanel({
 
   const handleRetry = () => {
     if (selectedFramework) {
-      // Limpiar caché para reintentar
-      const cacheKey = `question_${selectedFramework}`;
+      const sessionId = getSessionId(selectedFramework);
+      const baseCacheKey = `question_${selectedFramework}`;
+      const cacheKey = sessionId ? `${baseCacheKey}_${sessionId}` : baseCacheKey;
       sessionStorage.removeItem(cacheKey);
+      sessionStorage.removeItem(baseCacheKey);
       loadQuestions(selectedFramework);
     }
   };

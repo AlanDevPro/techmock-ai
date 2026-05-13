@@ -10,6 +10,9 @@ interface SidebarProps {
   activeFile: string;
   onSelectFile: (file: string, line?: number) => void;
   files: { [key: string]: string };
+  onFsUpdate: (
+    updater: (prev: { [key: string]: string }) => { [key: string]: string }
+  ) => void;
   onRefresh: () => void;
   selectedFramework: "vuejs" | "nextjs" | null;
   isQuestionOpen: boolean;
@@ -26,6 +29,7 @@ export default function Sidebar({
   activeFile,
   onSelectFile,
   files,
+  onFsUpdate,
   onRefresh,
   selectedFramework,
   isQuestionOpen,
@@ -59,6 +63,7 @@ export default function Sidebar({
             activeFile={activeFile}
             onSelectFile={handleFileSelect}
             files={files}
+            onFsUpdate={onFsUpdate}
             onRefresh={onRefresh}
           />
         );

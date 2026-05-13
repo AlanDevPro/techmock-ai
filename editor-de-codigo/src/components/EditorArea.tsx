@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Editor from "@monaco-editor/react";
+import { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import { updateFile } from "@/lib/webcontainer";
 import { useTheme } from "./IDE";
 import {
@@ -18,6 +18,7 @@ interface EditorAreaProps {
   activeFile: string;
   fileSystem: { [key: string]: string };
   onCursorChange?: (line: number, column: number) => void;
+  onContentChange?: (file: string, content: string) => void;
 }
 
 const getFileIcon = (filename: string) => {
@@ -36,10 +37,28 @@ const getFileIcon = (filename: string) => {
   return <FileBox size={13} className="text-gray-400 shrink-0" />;
 };
 
-export default function EditorArea({ activeFile, fileSystem, onCursorChange }: EditorAreaProps) {
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div
+      className="h-full w-full flex items-center justify-center text-xs"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      Cargando editor...
+    </div>
+  ),
+});
+
+export default function EditorArea({
+  activeFile,
+  fileSystem,
+  onCursorChange,
+  onContentChange,
+}: EditorAreaProps) {
   const { theme } = useTheme();
   const [content, setContent] = useState("");
   const [openTabs, setOpenTabs] = useState<string[]>([activeFile]);
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!openTabs.includes(activeFile)) {
@@ -56,7 +75,14 @@ export default function EditorArea({ activeFile, fileSystem, onCursorChange }: E
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       setContent(value);
-      updateFile(activeFile, value);
+      onContentChange?.(activeFile, value);
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      const timerId = window.setTimeout(() => {
+        updateFile(activeFile, value);
+      }, 300);
+      saveTimerRef.current = timerId;
     }
   };
 
@@ -200,7 +226,7 @@ export default function EditorArea({ activeFile, fileSystem, onCursorChange }: E
       </div>
 
       <div className="flex-1 w-full pt-1 relative">
-        <Editor
+        <MonacoEditor
           height="100%"
           language={getLanguage(activeFile)}
           theme={theme === "dark" ? "vs-dark" : "vs"}

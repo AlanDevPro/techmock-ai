@@ -4,10 +4,28 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useEffect, useState } from 'react';
 
+interface MedidorDificultad {
+  nivel: 'Junior Bajo' | 'Junior Medio' | 'Junior Alto';
+  puntaje: number;
+  tendencia: 'sube' | 'mantiene' | 'baja';
+  habilidad_estimada: 'Junior Bajo' | 'Junior Medio' | 'Junior Alto';
+  justificacion: string;
+}
+
+interface DificultadPreview {
+  session_id: string;
+  medidor_dificultad: MedidorDificultad;
+}
+
 export default function IDEPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [previews, setPreviews] = useState<Record<'vuejs' | 'nextjs', DificultadPreview | null>>({
+    vuejs: null,
+    nextjs: null,
+  });
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   useEffect(() => {
     if (!user && !isLoggingOut) {
@@ -15,6 +33,39 @@ export default function IDEPage() {
       return;
     }
   }, [user, isLoggingOut, router]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const loadPreview = async (framework: 'vuejs' | 'nextjs') => {
+      setIsLoadingPreview(true);
+
+      const storageKey = `rag_session_id_${framework}`;
+      const storedSession = localStorage.getItem(storageKey);
+      const queryBase = `framework=${encodeURIComponent(framework)}`;
+      const query = storedSession
+        ? `?${queryBase}&session_id=${encodeURIComponent(storedSession)}`
+        : `?${queryBase}`;
+
+      try {
+        const response = await fetch(`http://127.0.0.1:8000/api/preview-dificultad${query}`);
+        if (!response.ok) throw new Error('No se pudo obtener la dificultad');
+        const data = (await response.json()) as DificultadPreview;
+        if (data.session_id) {
+          localStorage.setItem(storageKey, data.session_id);
+        }
+        setPreviews((prev) => ({ ...prev, [framework]: data }));
+      } catch (error) {
+        console.error('Error al cargar dificultad:', error);
+        setPreviews((prev) => ({ ...prev, [framework]: null }));
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    };
+
+    loadPreview('vuejs');
+    loadPreview('nextjs');
+  }, [user]);
 
   const handleLogout = async () => {
     try {
@@ -27,7 +78,10 @@ export default function IDEPage() {
   };
 
   const handleOpenIDE = (framework: 'vuejs' | 'nextjs') => {
-    window.open(`http://localhost:3001?framework=${framework}`, '_blank');
+    const sessionId =
+      previews[framework]?.session_id || localStorage.getItem(`rag_session_id_${framework}`);
+    const sessionQuery = sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : '';
+    window.open(`http://localhost:3001?framework=${framework}${sessionQuery}`, '_blank');
   };
 
   const handleStart = (framework: 'vuejs' | 'nextjs') => {
@@ -100,12 +154,40 @@ export default function IDEPage() {
               <p className="text-lg text-white font-semibold">30 a 45 min</p>
             </div>
             <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Nivel sugerido</p>
-              <p className="text-lg text-white font-semibold">Intermedio / Avanzado</p>
-            </div>
-            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
               <p className="text-sm text-gray-500">Formato</p>
               <p className="text-lg text-white font-semibold">Editor en vivo</p>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Nivel sugerido Vue.js</p>
+              <p className="text-lg text-white font-semibold">
+                {isLoadingPreview && 'Cargando...'}
+                {!isLoadingPreview && previews.vuejs && (
+                  `${previews.vuejs.medidor_dificultad.nivel} · ${previews.vuejs.medidor_dificultad.puntaje}/6`
+                )}
+                {!isLoadingPreview && !previews.vuejs && 'Junior Bajo · 2/6'}
+              </p>
+              {previews.vuejs && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Tendencia: {previews.vuejs.medidor_dificultad.tendencia}
+                </p>
+              )}
+            </div>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Nivel sugerido Next.js</p>
+              <p className="text-lg text-white font-semibold">
+                {isLoadingPreview && 'Cargando...'}
+                {!isLoadingPreview && previews.nextjs && (
+                  `${previews.nextjs.medidor_dificultad.nivel} · ${previews.nextjs.medidor_dificultad.puntaje}/6`
+                )}
+                {!isLoadingPreview && !previews.nextjs && 'Junior Bajo · 2/6'}
+              </p>
+              {previews.nextjs && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Tendencia: {previews.nextjs.medidor_dificultad.tendencia}
+                </p>
+              )}
             </div>
           </div>
           <p className="text-gray-500 mt-5 text-sm">
