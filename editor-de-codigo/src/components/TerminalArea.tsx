@@ -20,57 +20,103 @@ export default function TerminalArea({
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const isTerminalReadyRef = useRef(false);
+  const isShellReadyRef = useRef(false);
+  const shellProcessRef = useRef<WebContainerProcess | null>(null);
+  const inputWriterRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
 
 
 
   useEffect(() => {
-    if (isBooting || !terminalRef.current || isTerminalReadyRef.current) return;
+    if (!terminalRef.current || isTerminalReadyRef.current) return;
 
-    if (!xtermRef.current) {
-      xtermRef.current = new Terminal({
-        theme:
-          theme === "dark"
-            ? {
-                background: "#1e1e1e",
-                foreground: "#cccccc",
-                cursor: "#ffffff",
-                selectionBackground: "#5da5d533",
-                black: "#1e1e1e",
-              }
-            : {
-                background: "#ffffff",
-                foreground: "#1e1e1e",
-                cursor: "#333333",
-                selectionBackground: "#0055cc33",
-                black: "#ffffff",
-              },
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        fontSize: 13,
-        cursorBlink: true,
-      });
+    xtermRef.current = new Terminal({
+      theme:
+        theme === "dark"
+          ? {
+              background: "#1e1e1e",
+              foreground: "#cccccc",
+              cursor: "#ffffff",
+              selectionBackground: "#5da5d533",
+              black: "#1e1e1e",
+            }
+          : {
+              background: "#ffffff",
+              foreground: "#1e1e1e",
+              cursor: "#333333",
+              selectionBackground: "#0055cc33",
+              black: "#ffffff",
+            },
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 13,
+      cursorBlink: true,
+      scrollback: 9999, // Asegura que haya suficiente historial para el scroll
+    });
 
-      fitAddonRef.current = new FitAddon();
-      xtermRef.current.loadAddon(fitAddonRef.current);
-      xtermRef.current.open(terminalRef.current);
-      fitAddonRef.current.fit();
-      isTerminalReadyRef.current = true;
-    }
+    fitAddonRef.current = new FitAddon();
+    xtermRef.current.loadAddon(fitAddonRef.current);
+    xtermRef.current.open(terminalRef.current);
+    fitAddonRef.current.fit();
+    isTerminalReadyRef.current = true;
+    onReady?.();
 
-    let shellProcess: WebContainerProcess;
-    let inputWriter: WritableStreamDefaultWriter<string>;
+    const handleResize = () => fitAddonRef.current?.fit();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [theme, onReady]);
 
-    const initTerminal = async () => {
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+    term.options.theme =
+      theme === "dark"
+        ? {
+            background: "#1e1e1e",
+            foreground: "#cccccc",
+            cursor: "#ffffff",
+            selectionBackground: "#5da5d533",
+            black: "#1e1e1e",
+          }
+        : {
+            background: "#ffffff",
+            foreground: "#1e1e1e",
+            cursor: "#333333",
+            selectionBackground: "#0055cc33",
+            black: "#ffffff",
+          };
+  }, [theme]);
+
+  const isInitializingShellRef = useRef(false);
+
+  useEffect(() => {
+    if (isBooting || isShellReadyRef.current || !xtermRef.current) return;
+    let cancelled = false;
+
+    const tryStartShell = async () => {
+      if (cancelled || isShellReadyRef.current) return;
+      
       const container = getWebContainer();
-      if (!container || !xtermRef.current) return;
+      if (!container) {
+        setTimeout(tryStartShell, 200);
+        return;
+      }
+
+      if (isInitializingShellRef.current) return;
+      isInitializingShellRef.current = true;
 
       try {
-        shellProcess = await container.spawn("jsh", {
+        const shellProcess = await container.spawn("jsh", {
           terminal: {
-            cols: xtermRef.current.cols,
-            rows: xtermRef.current.rows,
+            cols: xtermRef.current!.cols,
+            rows: xtermRef.current!.rows,
           },
         });
 
+        if (cancelled) {
+          shellProcess.kill();
+          return;
+        }
+
+        shellProcessRef.current = shellProcess;
         shellProcess.output.pipeTo(
           new WritableStream({
             write(data) {
@@ -79,23 +125,35 @@ export default function TerminalArea({
           })
         );
 
-        inputWriter = shellProcess.input.getWriter();
-        await inputWriter.write("ls\r");
+        const writer = shellProcess.input.getWriter();
+        inputWriterRef.current = writer;
+        await writer.write("ls\r");
 
-        xtermRef.current.onData((data) => {
-          if (inputWriter) inputWriter.write(data);
+        xtermRef.current?.onData((data) => {
+          inputWriterRef.current?.write(data);
         });
+
+        isShellReadyRef.current = true;
       } catch (err) {
         console.error("Shell initialization error", err);
+        isInitializingShellRef.current = false;
       }
     };
 
-    initTerminal();
+    tryStartShell();
 
-    const handleResize = () => fitAddonRef.current?.fit();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [isBooting, theme]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isBooting]);
 
-  return <div className="w-full h-full" ref={terminalRef} />;
+  // Añadimos pl-2 para el margen izquierdo y algo de padding general, 
+  // pero el contenedor debe manejar su propio tamaño con xterm.
+  return (
+    <div 
+      className="w-full h-full p-2 pr-4" 
+      ref={terminalRef} 
+      style={{ overflow: 'hidden' }}
+    />
+  );
 }

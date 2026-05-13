@@ -3,9 +3,34 @@ from pydantic import BaseModel, Field
 
 
 # -----------------------------
+# 🔹 MEDIDOR DE DIFICULTAD
+# -----------------------------
+class MedidorDificultad(BaseModel):
+    nivel: Literal["Junior Bajo", "Junior Medio", "Junior Alto"] = Field(
+        description="Nivel de dificultad dentro del rango Junior"
+    )
+    puntaje: int = Field(
+        description="Puntaje de dificultad del 1 al 10 (Junior solo 1-6)"
+    )
+    tendencia: Literal["sube", "mantiene", "baja"] = Field(
+        description="Tendencia del ajuste respecto a la pregunta anterior"
+    )
+    habilidad_estimada: Literal["Junior Bajo", "Junior Medio", "Junior Alto"] = Field(
+        description="Estimacion de habilidad basada en historial"
+    )
+    justificacion: str = Field(
+        description="Breve justificacion del nivel y tendencia"
+    )
+
+
+# -----------------------------
 # 🔹 RESPUESTA ENTREVISTA
 # -----------------------------
 class RespuestaEvaluacion(BaseModel):
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Identificador de sesion para historial de preguntas"
+    )
     pregunta_practica: Optional[str] = Field(
         default="",
         description="Enunciado de la prueba técnica"
@@ -21,6 +46,10 @@ class RespuestaEvaluacion(BaseModel):
     error_por_falta_de_contexto: Optional[str] = Field(
         default=None,
         description="Error por falta de contexto"
+    )
+    medidor_dificultad: Optional[MedidorDificultad] = Field(
+        default=None,
+        description="Medidor de dificultad progresiva para perfil Junior"
     )
 
 
@@ -114,6 +143,23 @@ class RespuestaAnalisisCodigo(BaseModel):
         default_factory=list,
         description="Recomendaciones accionables con prioridad"
     )
+    consejos_entrevista: List[str] = Field(
+        default_factory=list,
+        description="Consejos prácticos para mejorar el desempeño en entrevistas técnicas reales"
+    )
     evaluacion_tecnica: EvaluacionTecnica = Field(
         description="Evaluación técnica por dimensiones clave"
+    )
+
+
+# -----------------------------
+# 🔹 RESPUESTA PREVIEW DIFICULTAD
+# -----------------------------
+class RespuestaDificultadPreview(BaseModel):
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Identificador de sesion para historial de preguntas"
+    )
+    medidor_dificultad: MedidorDificultad = Field(
+        description="Medidor de dificultad progresiva para perfil Junior"
     )

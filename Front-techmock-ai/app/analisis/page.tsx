@@ -46,6 +46,7 @@ interface AnalysisResult {
   buenas_practicas: string[];
   malas_practicas: string[];
   recomendaciones: RecomendacionItem[];
+  consejos_entrevista: string[];
   evaluacion_tecnica: EvaluacionTecnica;
 }
 
@@ -166,7 +167,13 @@ export default function SubmissionsPage() {
   // ✅ Recibir resultado desde el IDE (postMessage)
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== "http://localhost:3001") return;
+      const allowedOrigins = new Set([
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+      ]);
+      if (!allowedOrigins.has(event.origin)) return;
       if (!event.data || event.data.type !== "analysis_result") return;
 
       const payload = event.data.payload as AnalysisResult;
@@ -180,8 +187,8 @@ export default function SubmissionsPage() {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // Volver al dashboard
-  const goToDashboard = () => {
+  const handleExit = () => {
+    window.close();
     router.push('/dashboard');
   };
 
@@ -224,10 +231,10 @@ export default function SubmissionsPage() {
           </div>
         </div>
         <button
-          onClick={goToDashboard}
+          onClick={handleExit}
           className="mt-4 px-6 py-2.5 rounded-lg text-sm font-medium border border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-400 transition-all flex items-center gap-2"
         >
-          <ArrowLeft size={16} /> Volver
+          <ArrowLeft size={16} /> Salir
         </button>
       </div>
     );
@@ -242,10 +249,10 @@ export default function SubmissionsPage() {
       <div className="sticky top-0 z-20 flex items-center gap-3 px-6 py-3 border-b"
         style={{ background: "#0d1525cc", borderColor: "#1e293b", backdropFilter: "blur(12px)" }}>
         <button
-          onClick={goToDashboard}
+          onClick={handleExit}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
         >
-          <ArrowLeft size={14} /> Volver
+          <ArrowLeft size={14} /> Salir
         </button>
         <span className="text-slate-700">|</span>
         <Code2 size={14} className="text-blue-400" />
@@ -378,6 +385,24 @@ export default function SubmissionsPage() {
                     <ChevronRight size={11} className="mt-0.5 shrink-0 text-slate-600" />
                     <p className="text-[11px] text-slate-400">{r.solucion}</p>
                   </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── Consejos Entrevista Real ── */}
+        {data.consejos_entrevista && data.consejos_entrevista.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-[10px] uppercase tracking-widest px-1 font-bold flex items-center gap-1.5" style={{ color: "#a855f7" }}>
+              <ShieldAlert size={12} /> Consejos para Entrevistas Reales
+            </h2>
+            <div className="p-4 rounded-xl border space-y-3"
+              style={{ background: "#a855f711", borderColor: "#a855f744" }}>
+              {data.consejos_entrevista.map((c, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <div className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#c084fc" }}></div>
+                  <p className="text-[12px] leading-relaxed" style={{ color: "#e9d5ff" }}>{c}</p>
                 </div>
               ))}
             </div>
