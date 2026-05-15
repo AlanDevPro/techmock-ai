@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException
-from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
+from typing import Optional
+from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo, RespuestaDificultadPreview
 import os
 
 print("📦 Importando llm_service...")
-from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
+from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm, preview_dificultad
 print("✅ llm_service importado")
 
 print("📦 Creando router...")
@@ -36,17 +37,26 @@ def leer_archivo_interno(ruta: str) -> str:
 # 🔹 ENDPOINTS DE PREGUNTAS
 # -----------------------------
 @router.get("/generar-preguntas/vue", response_model=RespuestaEvaluacion)
-async def generar_preguntas_vue_get():
+async def generar_preguntas_vue_get(session_id: Optional[str] = None):
     print("👉 Endpoint Vue llamado")
     contexto = leer_archivo_interno(VUE_FILE)
-    return await generar_evaluacion_llm(contexto, "Vue.js")
+    return await generar_evaluacion_llm(contexto, "Vue.js", session_id=session_id)
 
 
 @router.get("/generar-preguntas/next", response_model=RespuestaEvaluacion)
-async def generar_preguntas_next_get():
+async def generar_preguntas_next_get(session_id: Optional[str] = None):
     print("👉 Endpoint Next llamado")
     contexto = leer_archivo_interno(NEXT_FILE)
-    return await generar_evaluacion_llm(contexto, "Next.js")
+    return await generar_evaluacion_llm(contexto, "Next.js", session_id=session_id)
+
+
+@router.get("/preview-dificultad", response_model=RespuestaDificultadPreview)
+async def preview_dificultad_get(
+    session_id: Optional[str] = None,
+    framework: Optional[str] = None,
+):
+    print("👉 Endpoint preview dificultad llamado")
+    return await preview_dificultad(session_id=session_id, framework=framework)
 
 
 # -----------------------------
@@ -58,6 +68,9 @@ async def analizar_codigo(data: dict):
 
     codigo = data.get("codigo", "").strip()
     framework = data.get("framework", "general").strip()
+    session_id = data.get("session_id")
+    timeout = bool(data.get("timeout"))
+    strict = bool(data.get("strict", False))
 
     if not codigo:
         print("❌ Código vacío")
@@ -74,4 +87,10 @@ async def analizar_codigo(data: dict):
         )
 
     print("⏳ Enviando código a LLM...")
-    return await analizar_codigo_llm(codigo, framework)
+    return await analizar_codigo_llm(
+        codigo,
+        framework,
+        session_id=session_id,
+        timeout=timeout,
+        strict=strict,
+    )

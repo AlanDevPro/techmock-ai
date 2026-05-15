@@ -23,7 +23,7 @@ export default function IDE() {
   const router = useRouter();
   const [theme, setTheme] = useState<Theme>("dark");
   const [activeFile, setActiveFile] = useState("/src/App.vue");
-  const [fileSystem, setFileSystem] = useState<{ [key: string]: string }>({});
+  const [fileSystem, setFileSystem] = useState<{ [key: string]: string }>(() => getFileSystem());
   const [isBooting, setIsBooting] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBootingUi, setIsBootingUi] = useState(true);
@@ -43,6 +43,11 @@ export default function IDE() {
   const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
+
+  const [timerLabel, setTimerLabel] = useState<string | null>(null);
+  const [timerState, setTimerState] = useState<"running" | "ended" | "idle">("idle");
+  const timerIntervalRef = useRef<number | null>(null);
+  const autoSubmitRef = useRef(false);
   
   // Estados para el StatusBar dinámico
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
@@ -139,20 +144,41 @@ export default function IDE() {
         };
 
   useEffect(() => {
+    if (!selectedFramework) return;
     let mounted = true;
-    bootWebContainer().then(() => {
-      if (mounted) {
-        setIsBooting(false);
-        setFileSystem(getFileSystem());
-      }
-    });
-    return () => { mounted = false; };
+
+    const startBoot = () => {
+      bootWebContainer().then(() => {
+        if (mounted) {
+          setIsBooting(false);
+          setFileSystem(getFileSystem());
+        }
+      });
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const id = (window as unknown as { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(startBoot);
+      return () => {
+        mounted = false;
+        (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id);
+      };
+    }
+
+    const timeoutId = window.setTimeout(startBoot, 0);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [selectedFramework]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsBootingUi(false), 700);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     if (isBooting) return;
-    const timer = setTimeout(() => setIsBootingUi(false), 5000);
-    return () => clearTimeout(timer);
+    setIsBootingUi(false);
   }, [isBooting]);
 
   useEffect(() => {
@@ -163,10 +189,14 @@ export default function IDE() {
     if (framework === "vuejs" || framework === "nextjs") {
       hasLoadedQuestionsRef.current = true;
       setSelectedFramework(framework);
+      const sessionId = params.get("session_id");
+      if (sessionId) {
+        sessionStorage.setItem(`rag_session_id_${framework}`, sessionId);
+      }
       if (framework === "vuejs") {
         setActiveFile("/practica-vue/src/App.vue");
       } else if (framework === "nextjs") {
-        setActiveFile("/practica-nextjs/pages/index.js");
+        setActiveFile("/practica-nextjs/app/page.tsx");
       }
     }
   }, []);
@@ -290,6 +320,12 @@ export default function IDE() {
     setIsRefreshing(false);
   };
 
+  const handleFsUpdate = (
+    updater: (prev: { [key: string]: string }) => { [key: string]: string }
+  ) => {
+    setFileSystem((prev) => updater(prev));
+  };
+
   const handleSelectFileWithLine = (file: string, line?: number) => {
     console.log("📄 handleSelectFileWithLine llamado con:", file);
     setActiveFile(file);
@@ -303,6 +339,13 @@ export default function IDE() {
     setActiveFile(file);
   };
 
+  const handleContentChange = (file: string, content: string) => {
+    setFileSystem((prev) => {
+      if (prev[file] === content) return prev;
+      return { ...prev, [file]: content };
+    });
+  };
+
   const handleRunTests = async () => {
     setSubmitStatus("running");
     await new Promise((r) => setTimeout(r, 1800));
@@ -310,7 +353,7 @@ export default function IDE() {
     setTimeout(() => setSubmitStatus(null), 3000);
   };
 
-  const handleSubmitCode = async () => {
+  const handleSubmitCode = async (options?: { timeout?: boolean }) => {
     console.log("🚀 Iniciando handleSubmitCode...");
     setSubmitStatus("running");
     console.log("📁 activeFile:", activeFile);
@@ -345,9 +388,15 @@ export default function IDE() {
     console.log("🎯 Framework seleccionado:", selectedFramework);
     console.log("🔧 frameworkApi para el endpoint:", frameworkApi);
     
+    const sessionId = selectedFramework
+      ? sessionStorage.getItem(`rag_session_id_${selectedFramework}`)
+      : sessionStorage.getItem("rag_session_id");
     const payload = {
       codigo: codigoCompleto,
       framework: frameworkApi,
+      session_id: sessionId,
+      timeout: options?.timeout === true,
+      strict: false,
     };
     
     console.log("📦 Payload completo a enviar:");
@@ -385,7 +434,7 @@ export default function IDE() {
       console.log("✅ Submit completado con éxito, abriendo /analisis...");
 
       const analysisOrigin = "http://localhost:3000";
-      const analysisUrl = `${analysisOrigin}/analisis`;
+      const analysisUrl = `${analysisOrigin}/analisis?analysis=${encodeURIComponent(resultadoJson)}`;
       const analysisWindow = window.open(analysisUrl, "_blank");
 
       if (analysisWindow) {
@@ -395,7 +444,7 @@ export default function IDE() {
         );
       } else {
         // Fallback when popup is blocked.
-        window.location.href = `${analysisUrl}?analysis=${encodeURIComponent(resultadoJson)}`;
+        window.location.href = analysisUrl;
       }
       
     } catch (error) {
@@ -404,6 +453,76 @@ export default function IDE() {
       setTimeout(() => setSubmitStatus(null), 3000);
     }
   };
+
+  const handleSubmitRef = useRef(handleSubmitCode);
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmitCode;
+  });
+
+  useEffect(() => {
+    const handleQuestionLoaded = (e: Event) => {
+      console.log("🎯 question-loaded event received", e);
+      const customEvent = e as CustomEvent;
+      const { session_id, medidor } = customEvent.detail || {};
+      
+      const timerKey = session_id ? `timer_start_${session_id}` : "timer_start_default";
+      let startTime = sessionStorage.getItem(timerKey);
+      
+      if (!startTime) {
+        startTime = Date.now().toString();
+        sessionStorage.setItem(timerKey, startTime);
+      }
+
+      // Tiempo límite dinámico (30 a 45 minutos)
+      let minutos = 30; // Junior Bajo por defecto
+      if (medidor?.nivel === "Junior Medio") minutos = 40;
+      if (medidor?.nivel === "Junior Alto") minutos = 45;
+      
+      // Aseguramos estrictamente que el tiempo nunca sea menor a 30
+      minutos = Math.max(30, minutos);
+      
+      const TIME_LIMIT = minutos * 60;
+
+      if (timerIntervalRef.current) {
+        window.clearInterval(timerIntervalRef.current);
+      }
+      
+      setTimerState("running");
+      autoSubmitRef.current = false;
+
+      const updateTimer = () => {
+        const elapsed = Math.floor((Date.now() - parseInt(startTime!)) / 1000);
+        const secondsLeft = Math.max(0, TIME_LIMIT - elapsed);
+
+        const m = Math.floor(secondsLeft / 60).toString().padStart(2, "0");
+        const s = (secondsLeft % 60).toString().padStart(2, "0");
+        setTimerLabel(`${m}:${s}`);
+
+        if (secondsLeft <= 0) {
+          if (timerIntervalRef.current) window.clearInterval(timerIntervalRef.current);
+          setTimerState("ended");
+          if (!autoSubmitRef.current) {
+            autoSubmitRef.current = true;
+            handleSubmitRef.current({ timeout: true });
+          }
+        }
+      };
+
+      // Llamar inmediatamente
+      updateTimer();
+
+      // Configurar intervalo
+      timerIntervalRef.current = window.setInterval(updateTimer, 1000);
+    };
+
+    window.addEventListener("question-loaded", handleQuestionLoaded);
+    return () => {
+      window.removeEventListener("question-loaded", handleQuestionLoaded);
+      if (timerIntervalRef.current) {
+        window.clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
@@ -430,6 +549,8 @@ export default function IDE() {
           toggleTheme={toggleTheme} 
           selectedFramework={selectedFramework}
           activeFile={activeFile}
+          timerLabel={timerLabel ?? undefined}
+          timerState={timerState}
         />
 
         <div
@@ -500,6 +621,7 @@ export default function IDE() {
                 activeFile={activeFile}
                 onSelectFile={handleSelectFileWithLine}
                 files={fileSystem}
+                onFsUpdate={handleFsUpdate}
                 onRefresh={handleRefreshFs}
                 selectedFramework={selectedFramework}
                 isQuestionOpen={false}
@@ -545,6 +667,7 @@ export default function IDE() {
                       activeFile={activeFile} 
                       fileSystem={fileSystem}
                       onCursorChange={handleCursorChange}
+                      onContentChange={handleContentChange}
                     />
                   </div>
                   
