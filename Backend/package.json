@@ -1,0 +1,38 @@
+{
+  "name": "techmock-ai-backend",
+  "version": "1.0.0",
+  "description": "Backend API for TechMock AI",
+  "main": "/src/app.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/app.js",
+    "start": "node src/app.js",
+    "build": "echo \"No build step required\"",
+    "lint": "echo \"Add ESLint if needed\"",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@kubernetes/client-node": "^0.21.0",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.1",
+    "firebase-admin": "^12.0.0",
+    "helmet": "^7.2.0",
+    "joi": "^18.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^8.0.7",
+    "pg": "^8.11.5",
+    "uuid": "^9.0.1",
+    "winston": "^3.13.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^6.3.3"
+  }
+}
