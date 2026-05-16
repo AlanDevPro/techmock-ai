@@ -222,7 +222,7 @@ export const logoutAll = async (req, res, next) => {
 // ── GET /api/v1/auth/me ───────────────────────────────────────────────
 export const getCurrentUser = async (req, res, next) => {
   try {
-    const user = req.user;
+    const user = req.usuario;
     if (!user) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
 
     const providers = await getProviders(user.id);

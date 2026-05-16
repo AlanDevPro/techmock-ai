@@ -1,4 +1,3 @@
-// app/(protected)/dashboard/user/page.tsx
 'use client'
 
 import { useAuth } from '../../../contexts/AuthContext';
@@ -17,10 +16,8 @@ export default function UserDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('Dashboard');
 
-  if (!user) return null;
-
-  const displayName = user.name || user.email?.split('@')[0] || 'Usuario';
-  const displayEmail = user.email || '';
+  const displayName = user?.name || user?.email?.split('@')[0] || 'Usuario';
+  const displayEmail = user?.email || '';
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -32,7 +29,6 @@ export default function UserDashboard() {
       />
 
       <div className="flex">
-        {/* Contenido principal */}
         <div className="flex-1 p-8">
           <div className="mb-8">
             <h1 className="text-4xl font-bold text-white mb-4">Mission Control</h1>
@@ -45,10 +41,7 @@ export default function UserDashboard() {
           <DevelopmentTracks />
         </div>
 
-        {/* Sidebar derecho */}
         <div className="w-80 bg-gray-900/50 p-6 border-l border-gray-800 space-y-6">
-
-          {/* Tarjeta de perfil */}
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
             <div className="flex items-center space-x-3 mb-3">
               <div className="w-12 h-12 bg-gradient-to-br from-[#00ff00] to-green-600 rounded-full flex items-center justify-center">
@@ -64,7 +57,6 @@ export default function UserDashboard() {
               </div>
             </div>
 
-            {/* Estadísticas — en el futuro conectar a estadisticas_usuario */}
             <div className="space-y-2 text-sm mb-4">
               <div className="flex justify-between">
                 <span className="text-gray-400">Entrevistas completadas</span>
@@ -81,7 +73,7 @@ export default function UserDashboard() {
             </div>
 
             <button
-              onClick={() => router.push('developer/ide')}
+              onClick={() => router.push('/dashboard/developer/ide')}
               className="w-full bg-[#00ff00] hover:bg-[#00dd00] text-black px-4 py-2 rounded text-sm font-bold transition-colors mb-2"
             >
               Iniciar entrevista

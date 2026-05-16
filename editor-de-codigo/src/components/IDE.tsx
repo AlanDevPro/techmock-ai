@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import ActivityBar, { ActivityView } from "./ActivityBar";
 import LeftPanel from "./LeftPanel";
@@ -11,6 +11,7 @@ import TerminalArea from "./TerminalArea";
 import StatusBar from "./StatusBar";
 import TopMenuBar from "./TopMenuBar";
 import { bootWebContainer, getFileSystem, readWebContainerFiles } from "@/lib/webcontainer";
+import codeService from "@/services/codeService";
 
 export type Theme = "dark" | "light";
 export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
@@ -19,122 +20,125 @@ export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => voi
 });
 export const useTheme = () => useContext(ThemeContext);
 
+// ✅ Helpers para leer URL en el inicializador de useState (solo en cliente)
+function getInitialFramework(): "vuejs" | "nextjs" | null {
+  if (typeof window === "undefined") return null;
+  const fw = new URLSearchParams(window.location.search).get("framework");
+  return fw === "vuejs" || fw === "nextjs" ? fw : null;
+}
+
+function getInitialActiveFile(framework: "vuejs" | "nextjs" | null): string {
+  if (framework === "vuejs")  return "/practica-vue/src/App.vue";
+  if (framework === "nextjs") return "/practica-nextjs/pages/index.js";
+  return "/src/App.vue";
+}
+
 export default function IDE() {
   const router = useRouter();
   const [theme, setTheme] = useState<Theme>("dark");
-  const [activeFile, setActiveFile] = useState("/src/App.vue");
+
+  // ✅ Error 2 resuelto: inicializadores lazy en lugar de useEffect + setState
+  const [selectedFramework] = useState<"vuejs" | "nextjs" | null>(getInitialFramework);
+  const [activeFile, setActiveFile] = useState<string>(() =>
+    getInitialActiveFile(getInitialFramework())
+  );
+
   const [fileSystem, setFileSystem] = useState<{ [key: string]: string }>({});
   const [isBooting, setIsBooting] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isBootingUi, setIsBootingUi] = useState(true);
-  const [selectedFramework, setSelectedFramework] = useState<"vuejs" | "nextjs" | null>(null);
   const [activeView, setActiveView] = useState<ActivityView>("explorer");
   const [submitStatus, setSubmitStatus] = useState<null | "running" | "success" | "error">(null);
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(400);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
-  
+
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
-  
-  // Estados para la Terminal
+
   const [isTerminalVisible, setIsTerminalVisible] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
-  
-  // Estados para el StatusBar dinámico
+
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
-  const [diagnostics, setDiagnostics] = useState({ errors: 0, warnings: 0, infos: 0 });
-  
-  const hasLoadedQuestionsRef = useRef(false);
+
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-  const togglePreviewVisibility = () => setIsPreviewVisible(!isPreviewVisible);
-  const toggleSidebarVisibility = () => setIsSidebarVisible(!isSidebarVisible);
-  const toggleTerminalVisibility = () => setIsTerminalVisible(!isTerminalVisible);
+  // ✅ Error 1 resuelto: useMemo en lugar de useEffect + setState
+  // Los diagnósticos son derivación pura de activeFile + fileSystem, no necesitan estado propio
+  const diagnostics = useMemo(() => {
+    const content = fileSystem[activeFile];
+    if (!content) return { errors: 0, warnings: 0, infos: 0 };
 
-  // Función para manejar el cambio de vista en ActivityBar
+    let errors = 0, warnings = 0, infos = 0;
+
+    errors   += (content.match(/error/i)         ?? []).length;
+    warnings += (content.match(/warning/i)       ?? []).length;
+    infos    += (content.match(/TODO|FIXME|HACK/i) ?? []).length;
+
+    if (content.includes("undefined"))      errors++;
+    if (content.includes("null reference")) errors++;
+    if (content.includes("console.log"))    infos++;
+    if (content.includes("var "))           warnings++;
+    if (content.match(/==/g) && !content.match(/===/g)) warnings++;
+
+    return { errors, warnings, infos };
+  }, [activeFile, fileSystem]);
+
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const togglePreviewVisibility  = () => setIsPreviewVisible((v) => !v);
+  const toggleSidebarVisibility  = () => setIsSidebarVisible((v) => !v);
+  const toggleTerminalVisibility = () => setIsTerminalVisible((v) => !v);
+
   const handleViewChange = (view: ActivityView) => {
     setActiveView(view);
-    if (!isSidebarVisible) {
-      setIsSidebarVisible(true);
-    }
+    if (!isSidebarVisible) setIsSidebarVisible(true);
   };
 
-  // Función para actualizar la posición del cursor desde EditorArea
   const handleCursorChange = (line: number, column: number) => {
     setCursorPosition({ line, column });
   };
 
-  // Detectar errores/warnings reales del archivo activo
-  useEffect(() => {
-    if (activeFile && fileSystem[activeFile]) {
-      const content = fileSystem[activeFile];
-      let errors = 0, warnings = 0, infos = 0;
-      
-      if (content) {
-        // Análisis de errores reales
-        if (content.match(/error/i)) errors = (content.match(/error/i) || []).length;
-        if (content.match(/warning/i)) warnings = (content.match(/warning/i) || []).length;
-        if (content.match(/TODO|FIXME|HACK/i)) infos = (content.match(/TODO|FIXME|HACK/i) || []).length;
-        
-        // Errores de sintaxis adicionales
-        if (content.includes("undefined")) errors++;
-        if (content.includes("null reference")) errors++;
-        if (content.includes("console.log")) infos++;
-        
-        // Advertencias de estilo
-        if (content.includes("var ")) warnings++;
-        if (content.match(/==/g) && !content.match(/===/g)) warnings++;
-      }
-      
-      setDiagnostics({ errors, warnings, infos });
-    } else {
-      setDiagnostics({ errors: 0, warnings: 0, infos: 0 });
-    }
-  }, [activeFile, fileSystem]);
-
   const cssVars: Record<string, string> =
     theme === "dark"
       ? {
-          "--bg-primary": "#1e1e1e",
-          "--bg-secondary": "#252526",
-          "--bg-tertiary": "#2d2d2d",
-          "--bg-hover": "#2a2d2e",
-          "--border": "#3c3c3c",
-          "--text-primary": "#cccccc",
-          "--text-secondary": "#8c8c8c",
-          "--text-heading": "#e8e8e8",
-          "--accent": "#007acc",
-          "--accent-hover": "#005fa3",
-          "--tab-active-bg": "#1e1e1e",
-          "--tab-inactive-bg": "#2d2d2d",
-          "--status-bg": "#007acc",
-          "--btn-run-bg": "#1a73e8",
-          "--btn-run-hover": "#1558b0",
-          "--btn-submit-bg": "#2cba44",
+          "--bg-primary":       "#1e1e1e",
+          "--bg-secondary":     "#252526",
+          "--bg-tertiary":      "#2d2d2d",
+          "--bg-hover":         "#2a2d2e",
+          "--border":           "#3c3c3c",
+          "--text-primary":     "#cccccc",
+          "--text-secondary":   "#8c8c8c",
+          "--text-heading":     "#e8e8e8",
+          "--accent":           "#007acc",
+          "--accent-hover":     "#005fa3",
+          "--tab-active-bg":    "#1e1e1e",
+          "--tab-inactive-bg":  "#2d2d2d",
+          "--status-bg":        "#007acc",
+          "--btn-run-bg":       "#1a73e8",
+          "--btn-run-hover":    "#1558b0",
+          "--btn-submit-bg":    "#2cba44",
           "--btn-submit-hover": "#1e8e31",
         }
       : {
-          "--bg-primary": "#ffffff",
-          "--bg-secondary": "#f3f3f3",
-          "--bg-tertiary": "#e8e8e8",
-          "--bg-hover": "#e4e4e4",
-          "--border": "#d4d4d4",
-          "--text-primary": "#383838",
-          "--text-secondary": "#6e6e6e",
-          "--text-heading": "#1e1e1e",
-          "--accent": "#005fb8",
-          "--accent-hover": "#003f80",
-          "--tab-active-bg": "#ffffff",
-          "--tab-inactive-bg": "#ececec",
-          "--status-bg": "#005fb8",
-          "--btn-run-bg": "#1a73e8",
-          "--btn-run-hover": "#1558b0",
-          "--btn-submit-bg": "#2cba44",
+          "--bg-primary":       "#ffffff",
+          "--bg-secondary":     "#f3f3f3",
+          "--bg-tertiary":      "#e8e8e8",
+          "--bg-hover":         "#e4e4e4",
+          "--border":           "#d4d4d4",
+          "--text-primary":     "#383838",
+          "--text-secondary":   "#6e6e6e",
+          "--text-heading":     "#1e1e1e",
+          "--accent":           "#005fb8",
+          "--accent-hover":     "#003f80",
+          "--tab-active-bg":    "#ffffff",
+          "--tab-inactive-bg":  "#ececec",
+          "--status-bg":        "#005fb8",
+          "--btn-run-bg":       "#1a73e8",
+          "--btn-run-hover":    "#1558b0",
+          "--btn-submit-bg":    "#2cba44",
           "--btn-submit-hover": "#1e8e31",
         };
 
@@ -155,130 +159,83 @@ export default function IDE() {
     return () => clearTimeout(timer);
   }, [isBooting]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (hasLoadedQuestionsRef.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const framework = params.get("framework");
-    if (framework === "vuejs" || framework === "nextjs") {
-      hasLoadedQuestionsRef.current = true;
-      setSelectedFramework(framework);
-      if (framework === "vuejs") {
-        setActiveFile("/practica-vue/src/App.vue");
-      } else if (framework === "nextjs") {
-        setActiveFile("/practica-nextjs/pages/index.js");
-      }
-    }
-  }, []);
-
-  // Manejar el redimensionamiento del preview
+  // Redimensionamiento del preview
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingPreview) return;
-      const newWidth = window.innerWidth - e.clientX;
-      const minWidth = 200;
-      const maxWidth = window.innerWidth * 0.7;
-      const clampedWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+      const clampedWidth = Math.min(Math.max(window.innerWidth - e.clientX, 200), window.innerWidth * 0.7);
       setPreviewWidth(clampedWidth);
     };
-
-    const handleMouseUp = () => {
-      setIsResizingPreview(false);
-    };
+    const handleMouseUp = () => setIsResizingPreview(false);
 
     if (isResizingPreview) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'ew-resize';
-      document.body.style.userSelect = 'none';
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
     }
-
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
   }, [isResizingPreview]);
 
-  // Manejar el redimensionamiento del sidebar
+  // Redimensionamiento del sidebar
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingSidebar) return;
-      const newWidth = e.clientX;
-      const maxWidth = 500;
-      
-      if (newWidth < 10) {
+      if (e.clientX < 10) {
         setIsSidebarVisible(false);
         setIsResizingSidebar(false);
         return;
       }
-      
-      const clampedWidth = Math.min(newWidth, maxWidth);
-      setSidebarWidth(clampedWidth);
+      setSidebarWidth(Math.min(e.clientX, 500));
     };
-
-    const handleMouseUp = () => {
-      setIsResizingSidebar(false);
-    };
+    const handleMouseUp = () => setIsResizingSidebar(false);
 
     if (isResizingSidebar) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'ew-resize';
-      document.body.style.userSelect = 'none';
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
     }
-
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
   }, [isResizingSidebar]);
 
-  // Manejar el redimensionamiento de la terminal
+  // Redimensionamiento de la terminal
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingTerminal) return;
-      const windowHeight = window.innerHeight;
-      const mouseY = e.clientY;
-      const maxHeight = windowHeight * 0.7;
-      const minHeight = 50;
-      const newHeight = windowHeight - mouseY;
-      
+      const newHeight = window.innerHeight - e.clientY;
       if (newHeight < 30) {
         setIsTerminalVisible(false);
         setIsResizingTerminal(false);
         return;
       }
-      
-      const clampedHeight = Math.min(Math.max(newHeight, minHeight), maxHeight);
+      const clampedHeight = Math.min(Math.max(newHeight, 50), window.innerHeight * 0.7);
       setTerminalHeight(clampedHeight);
-      
-      setTimeout(() => {
-        if (terminalAreaRef.current?.fitTerminal) {
-          terminalAreaRef.current.fitTerminal();
-        }
-      }, 50);
+      setTimeout(() => terminalAreaRef.current?.fitTerminal?.(), 50);
     };
-
-    const handleMouseUp = () => {
-      setIsResizingTerminal(false);
-    };
+    const handleMouseUp = () => setIsResizingTerminal(false);
 
     if (isResizingTerminal) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'ns-resize';
-      document.body.style.userSelect = 'none';
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
     }
-
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
   }, [isResizingTerminal]);
 
@@ -293,9 +250,7 @@ export default function IDE() {
   const handleSelectFileWithLine = (file: string, line?: number) => {
     console.log("📄 handleSelectFileWithLine llamado con:", file);
     setActiveFile(file);
-    if (line) {
-      console.log(`Navegar a línea ${line} en el archivo ${file}`);
-    }
+    if (line) console.log(`Navegar a línea ${line} en el archivo ${file}`);
   };
 
   const handleSelectFile = (file: string) => {
@@ -313,10 +268,7 @@ export default function IDE() {
   const handleSubmitCode = async () => {
     console.log("🚀 Iniciando handleSubmitCode...");
     setSubmitStatus("running");
-    console.log("📁 activeFile:", activeFile);
-    console.log("📂 fileSystem keys:", Object.keys(fileSystem));
-    console.log("📊 Total de archivos en fileSystem:", Object.keys(fileSystem).length);
-    
+
     if (!fileSystem[activeFile]) {
       console.error("❌ El archivo activo no existe en fileSystem:", activeFile);
       setSubmitStatus("error");
@@ -325,9 +277,6 @@ export default function IDE() {
     }
 
     const codigoCompleto = fileSystem[activeFile];
-    console.log("📄 contenido del archivo activo:");
-    console.log("📏 Longitud del código:", codigoCompleto?.length || 0, "caracteres");
-    
     if (!codigoCompleto || codigoCompleto.trim().length === 0) {
       console.error("❌ No hay código válido para enviar");
       setSubmitStatus("error");
@@ -335,69 +284,58 @@ export default function IDE() {
       return;
     }
 
-    const frameworkApi =
-      selectedFramework === "vuejs"
-        ? "vue"
-        : selectedFramework === "nextjs"
-        ? "next"
-        : "react";
+    const frameworkApi = codeService.resolverFrameworkApi(selectedFramework);
+    console.log("🎯 Framework:", selectedFramework, "→ API:", frameworkApi);
 
-    console.log("🎯 Framework seleccionado:", selectedFramework);
-    console.log("🔧 frameworkApi para el endpoint:", frameworkApi);
-    
-    const payload = {
-      codigo: codigoCompleto,
-      framework: frameworkApi,
-    };
-    
-    console.log("📦 Payload completo a enviar:");
-    console.log("   - framework:", payload.framework);
-    console.log("   - codigo length:", payload.codigo.length, "caracteres");
-    
     try {
-      console.log("✈️ Enviando petición POST al backend...");
-      
-      const response = await fetch("http://127.0.0.1:8000/api/analizar-codigo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const resultado = await codeService.analizarCodigo({
+        codigo: codigoCompleto,
+        framework: frameworkApi,
       });
-
-      console.log("📡 Respuesta recibida del backend:");
-      console.log("   - Status:", response.status);
-      console.log("   - OK:", response.ok);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`❌ HTTP ${response.status}:`, errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const resultado = await response.json();
-      console.log("✅ Resultado recibido del backend:");
-      console.log("   - Claves del resultado:", Object.keys(resultado));
 
       const resultadoJson = JSON.stringify(resultado);
       sessionStorage.setItem("analisis_resultado", resultadoJson);
-      console.log("💾 Resultado guardado en sessionStorage");
 
       setSubmitStatus("success");
-      console.log("✅ Submit completado con éxito, abriendo /analisis...");
 
+      // DESPUÉS — siempre abre el analisis en el frontend correctamente
       const analysisOrigin = "http://localhost:3000";
-      const analysisUrl = `${analysisOrigin}/analisis`;
+      const analysisUrl = `${analysisOrigin}/dashboard/developer/interviews/analisis`;
+
+      // Guardar en sessionStorage del IDE (no sirve cross-origin, pero postMessage sí)
       const analysisWindow = window.open(analysisUrl, "_blank");
 
       if (analysisWindow) {
-        analysisWindow.postMessage(
-          { type: "analysis_result", payload: resultado },
-          analysisOrigin
-        );
-      } else {
-        // Fallback when popup is blocked.
-        window.location.href = `${analysisUrl}?analysis=${encodeURIComponent(resultadoJson)}`;
-      }
+        const sendAnalysis = () => {
+          analysisWindow.postMessage(
+            {
+              type: "analysis_result",
+              payload: resultado,
+            },
+            analysisOrigin
+          );
+        };
       
+        // Esperar carga real
+        analysisWindow.onload = sendAnalysis;
+      
+        // fallback
+        setTimeout(sendAnalysis, 1500);
+  
+      } else {
+        // Fallback: pasar por query param (la página lo leerá)
+        window.open(
+          `${analysisUrl}?analysis=${encodeURIComponent(resultadoJson)}`,
+          "_blank"
+        );
+      }
+
+      setSubmitStatus("success");
+
+
+
+
+
     } catch (error) {
       console.error("❌ Error al analizar código:", error);
       setSubmitStatus("error");
@@ -425,9 +363,9 @@ export default function IDE() {
           </div>
         )}
 
-        <TopMenuBar 
-          theme={theme} 
-          toggleTheme={toggleTheme} 
+        <TopMenuBar
+          theme={theme}
+          toggleTheme={toggleTheme}
           selectedFramework={selectedFramework}
           activeFile={activeFile}
         />
@@ -453,46 +391,31 @@ export default function IDE() {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <span
-              onClick={toggleSidebarVisibility}
-              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
-              style={{ 
-                borderColor: "var(--accent)", 
-                backgroundColor: isSidebarVisible ? "var(--accent)" : "transparent",
-                color: isSidebarVisible ? "#ffffff" : "var(--accent)"
-              }}
-            >
-              {isSidebarVisible ? "Sidebar ✓" : "Sidebar"}
-            </span>
-            <span
-              onClick={togglePreviewVisibility}
-              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
-              style={{ 
-                borderColor: "var(--accent)", 
-                backgroundColor: isPreviewVisible ? "var(--accent)" : "transparent",
-                color: isPreviewVisible ? "#ffffff" : "var(--accent)"
-              }}
-            >
-              {isPreviewVisible ? "Preview ✓" : "Preview"}
-            </span>
-            <span
-              onClick={toggleTerminalVisibility}
-              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
-              style={{ 
-                borderColor: "var(--accent)", 
-                backgroundColor: isTerminalVisible ? "var(--accent)" : "transparent",
-                color: isTerminalVisible ? "#ffffff" : "var(--accent)"
-              }}
-            >
-              {isTerminalVisible ? "Terminal ✓" : "Terminal"}
-            </span>
+            {[
+              { label: "Sidebar",  active: isSidebarVisible,  toggle: toggleSidebarVisibility },
+              { label: "Preview",  active: isPreviewVisible,  toggle: togglePreviewVisibility },
+              { label: "Terminal", active: isTerminalVisible, toggle: toggleTerminalVisibility },
+            ].map(({ label, active, toggle }) => (
+              <span
+                key={label}
+                onClick={toggle}
+                className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+                style={{
+                  borderColor: "var(--accent)",
+                  backgroundColor: active ? "var(--accent)" : "transparent",
+                  color: active ? "#ffffff" : "var(--accent)",
+                }}
+              >
+                {active ? `${label} ✓` : label}
+              </span>
+            ))}
           </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 22px - 36px - 28px)" }}>
           <LeftPanel />
           <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
-          
+
           {isSidebarVisible && (
             <>
               <Sidebar
@@ -509,10 +432,10 @@ export default function IDE() {
               />
               <div
                 className="cursor-ew-resize hover:bg-accent transition-colors"
-                style={{ 
+                style={{
                   background: isResizingSidebar ? "var(--accent)" : "transparent",
                   width: "3px",
-                  flexShrink: 0
+                  flexShrink: 0,
                 }}
                 onMouseDown={() => setIsResizingSidebar(true)}
               />
@@ -520,57 +443,60 @@ export default function IDE() {
           )}
 
           <div className="flex flex-col flex-1 h-full min-w-0">
-            <div 
-              className="flex-1 min-h-0 relative flex flex-row" 
-              style={{ 
+            <div
+              className="flex-1 min-h-0 relative flex flex-row"
+              style={{
                 background: "var(--bg-primary)",
-                height: isTerminalVisible ? `calc(100% - ${terminalHeight}px)` : '100%',
-                transition: isResizingTerminal ? 'none' : 'height 0.2s ease'
+                height: isTerminalVisible ? `calc(100% - ${terminalHeight}px)` : "100%",
+                transition: isResizingTerminal ? "none" : "height 0.2s ease",
               }}
             >
               {isBooting ? (
-                <div className="flex items-center justify-center h-full w-full" style={{ color: "var(--text-secondary)" }}>
+                <div
+                  className="flex items-center justify-center h-full w-full"
+                  style={{ color: "var(--text-secondary)" }}
+                >
                   Arrancando micro-sistema operativo en la web...
                 </div>
               ) : (
                 <>
-                  <div 
+                  <div
                     className="flex-1 min-w-0 h-full"
-                    style={{ 
-                      width: isPreviewVisible ? `calc(100% - ${previewWidth}px)` : '100%',
-                      transition: isResizingPreview ? 'none' : 'width 0.2s ease'
+                    style={{
+                      width: isPreviewVisible ? `calc(100% - ${previewWidth}px)` : "100%",
+                      transition: isResizingPreview ? "none" : "width 0.2s ease",
                     }}
                   >
-                    <EditorArea 
-                      activeFile={activeFile} 
+                    <EditorArea
+                      activeFile={activeFile}
                       fileSystem={fileSystem}
                       onCursorChange={handleCursorChange}
                     />
                   </div>
-                  
+
                   {isPreviewVisible && (
                     <div
                       className="cursor-ew-resize hover:bg-accent transition-colors"
-                      style={{ 
+                      style={{
                         background: isResizingPreview ? "var(--accent)" : "transparent",
                         width: "3px",
-                        flexShrink: 0
+                        flexShrink: 0,
                       }}
                       onMouseDown={() => setIsResizingPreview(true)}
                     />
                   )}
-                  
+
                   {isPreviewVisible && (
                     <div
                       className="h-full flex flex-col"
-                      style={{ 
+                      style={{
                         width: `${previewWidth}px`,
                         minWidth: "200px",
                         maxWidth: "70vw",
-                        transition: isResizingPreview ? 'none' : 'width 0.2s ease'
+                        transition: isResizingPreview ? "none" : "width 0.2s ease",
                       }}
                     >
-                      <PreviewArea 
+                      <PreviewArea
                         isVisible={isPreviewVisible}
                         onToggleVisibility={togglePreviewVisibility}
                       />
@@ -583,28 +509,31 @@ export default function IDE() {
             {isTerminalVisible && (
               <div
                 className="cursor-ns-resize hover:bg-accent transition-colors"
-                style={{ 
+                style={{
                   background: isResizingTerminal ? "var(--accent)" : "transparent",
                   height: "3px",
-                  flexShrink: 0
+                  flexShrink: 0,
                 }}
                 onMouseDown={() => setIsResizingTerminal(true)}
               />
             )}
 
             {isTerminalVisible && (
-              <div 
+              <div
                 className="border-t flex flex-col shrink-0"
-                style={{ 
+                style={{
                   height: `${terminalHeight}px`,
                   minHeight: "50px",
                   maxHeight: "70vh",
                   background: "var(--bg-primary)",
                   borderColor: "var(--border)",
-                  transition: isResizingTerminal ? 'none' : 'height 0.2s ease'
+                  transition: isResizingTerminal ? "none" : "height 0.2s ease",
                 }}
               >
-                <div className="flex h-9 border-b items-center px-4" style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}>
+                <div
+                  className="flex h-9 border-b items-center px-4"
+                  style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+                >
                   <span
                     onClick={toggleTerminalVisibility}
                     className="text-[11px] font-semibold uppercase cursor-pointer border-b h-full flex items-center mb-[-1px] hover:opacity-80 transition-opacity"
@@ -614,14 +543,10 @@ export default function IDE() {
                   </span>
                 </div>
                 <div className="flex-1 relative overflow-hidden" style={{ background: "var(--bg-primary)" }}>
-                  <TerminalArea 
+                  <TerminalArea
                     isBooting={isBooting}
                     onReady={() => {
-                      setTimeout(() => {
-                        if (terminalAreaRef.current?.fitTerminal) {
-                          terminalAreaRef.current.fitTerminal();
-                        }
-                      }, 100);
+                      setTimeout(() => terminalAreaRef.current?.fitTerminal?.(), 100);
                     }}
                   />
                 </div>
@@ -645,7 +570,6 @@ export default function IDE() {
                   <span className="text-[12px] text-red-400 font-semibold">✗ Error al analizar</span>
                 )}
 
-                
                 <button
                   onClick={handleSubmitCode}
                   disabled={submitStatus === "running"}
@@ -659,14 +583,20 @@ export default function IDE() {
           </div>
         </div>
 
-        <StatusBar 
+        <StatusBar
           isBooting={isBooting}
           line={cursorPosition.line}
           column={cursorPosition.column}
           indentSize={2}
           encoding="UTF-8"
           lineEnding="CRLF"
-          language={activeFile?.split(".").pop() === "tsx" ? "TypeScript JSX" : activeFile?.split(".").pop() === "vue" ? "Vue.js" : "TypeScript"}
+          language={
+            activeFile?.split(".").pop() === "tsx"
+              ? "TypeScript JSX"
+              : activeFile?.split(".").pop() === "vue"
+              ? "Vue.js"
+              : "TypeScript"
+          }
           branch="main"
           errors={diagnostics.errors}
           warnings={diagnostics.warnings}

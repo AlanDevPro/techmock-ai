@@ -1,4 +1,3 @@
-// app/(protected)/dashboard/layout.tsx
 'use client'
 
 import { useEffect } from 'react';
@@ -10,21 +9,34 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user } = useAuth();
+
+  const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!user) {
-      router.push('/auth');
-    }
-  }, [user, router]);
-
+  console.log('🏠 [LAYOUT] useEffect → loading:', loading, '| user:', user?.email ?? null);
+  if (loading) return;
   if (!user) {
+    console.warn('🏠 [LAYOUT] Sin usuario → redirigiendo a /auth');
+    router.push('/auth');
+  }
+}, [user, loading, router]);
+
+// Y en el render:
+console.log('🏠 [LAYOUT] render → loading:', loading, '| user:', user?.email ?? null);
+
+  // ⛔ mientras carga NO renderizar nada protegido
+  if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#00ff00]" />
       </div>
     );
+  }
+
+  // ⛔ si terminó loading y no hay user
+  if (!user) {
+    return null;
   }
 
   return (
