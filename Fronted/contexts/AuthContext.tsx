@@ -78,15 +78,28 @@ function decodeJWT(token: string): Omit<AppUser, 'providers'> | null {
  * Construye el AppUser completo combinando el JWT (identidad)
  * con data.user.providers (siempre viene del backend, nunca del JWT).
  */
-function buildAppUser(accessToken: string, backendUser: any): AppUser {
+interface BackendUser {
+  providers?: string[];
+}
+
+function buildAppUser(
+  accessToken: string,
+  backendUser: BackendUser
+): AppUser {
+
   const decoded = decodeJWT(accessToken);
-  if (!decoded) throw new Error('Token JWT inválido');
+
+  if (!decoded) {
+    throw new Error('Token JWT inválido');
+  }
 
   return {
     ...decoded,
-    providers: backendUser?.providers ?? [], // ✅ FUENTE DE VERDAD: backend
+    providers: backendUser.providers ?? [],
   };
 }
+
+
 
 function saveTokens(accessToken: string, refreshToken: string) {
   localStorage.setItem('accessToken', accessToken);
@@ -102,11 +115,15 @@ function clearTokens() {
  * Sincroniza un usuario de Firebase (Google/GitHub) con tu backend.
  * Devuelve AppUser con providers reales desde data.user.providers.
  */
-async function syncFirebaseUserWithBackend(firebaseUser: FirebaseUser): Promise<AppUser> {
-  const idToken = await firebaseUser.getIdToken();
+interface BackendUser {
+  providers?: string[];
+}
 
-  console.log("🔥 [AUTH] syncFirebaseUserWithBackend - idToken enviado");
-  console.log("🔥 [AUTH] URL:", `${API}/auth/firebase`);
+async function syncFirebaseUserWithBackend(
+  firebaseUser: FirebaseUser
+): Promise<AppUser> {
+
+  const idToken = await firebaseUser.getIdToken();
 
   const res = await fetch(`${API}/auth/firebase`, {
     method: 'POST',
@@ -116,13 +133,17 @@ async function syncFirebaseUserWithBackend(firebaseUser: FirebaseUser): Promise<
     },
   });
 
-  const data = await res.json();
-
-  console.log("🔥 [AUTH] Response status:", res.status);
-  console.log("🔥 [AUTH] Response data:", data);
+  const data: {
+    accessToken: string;
+    refreshToken: string;
+    user: BackendUser;
+    error?: string;
+  } = await res.json();
 
   if (!res.ok) {
-    throw new Error(data.error ?? `Error sincronizando usuario: ${res.status}`);
+    throw new Error(
+      data.error ?? `Error sincronizando usuario: ${res.status}`
+    );
   }
 
   if (!data.accessToken || !data.refreshToken) {
@@ -131,13 +152,9 @@ async function syncFirebaseUserWithBackend(firebaseUser: FirebaseUser): Promise<
 
   saveTokens(data.accessToken, data.refreshToken);
 
-  // ✅ CORRECCIÓN CLAVE: usar data.user.providers, NO decoded.providers
-  const appUser = buildAppUser(data.accessToken, data.user);
-  
-  console.log('🔍 [AUTH] syncFirebase → providers:', appUser.providers);
-  
-  return appUser;
+  return buildAppUser(data.accessToken, data.user);
 }
+
 
 // ─────────────────────────────────────────────
 // CONTEXT
@@ -325,59 +342,150 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // ─────────────────────────────────────────────
 
   const loginWithGoogle = async (): Promise<void> => {
-    const googleProvider = new GoogleAuthProvider();
+  const googleProvider = new GoogleAuthProvider();
 
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const appUser = await syncFirebaseUserWithBackend(result.user);
-      setUser(appUser);
-    } catch (error: any) {
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        const email = error.customData?.email;
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+
+    const appUser = await syncFirebaseUserWithBackend(
+      result.user
+    );
+
+    setUser(appUser);
+
+  } catch (error: unknown) {
+
+    // 🔹 Validamos que sea un error tipado
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error
+    ) {
+
+      const firebaseError = error as {
+        code: string;
+        customData?: {
+          email?: string;
+        };
+        message?: string;
+      };
+
+      // 🔹 Cuenta existente con otro provider
+      if (
+        firebaseError.code ===
+        'auth/account-exists-with-different-credential'
+      ) {
+
+        const email = firebaseError.customData?.email;
+
         if (email) {
-          const methods = await fetchSignInMethodsForEmail(auth, email);
+
+          const methods = await fetchSignInMethodsForEmail(
+            auth,
+            email
+          );
+
           throw new Error(
             `Este correo (${email}) ya está registrado con "${methods[0]}". ` +
             `Inicia sesión con ese método y luego vincula Google.`
           );
         }
       }
-      throw new Error(error.message ?? 'Error al iniciar sesión con Google');
+
+      // 🔹 Otros errores Firebase
+      throw new Error(
+        firebaseError.message ??
+        'Error al iniciar sesión con Google'
+      );
     }
-  };
+
+    // 🔹 Error inesperado
+    throw new Error(
+      'Ocurrió un error inesperado al iniciar sesión con Google'
+    );
+  }
+};
+
+  
 
   const loginWithGithub = async (): Promise<void> => {
     const githubProvider = new GithubAuthProvider();
 
     try {
       const result = await signInWithPopup(auth, githubProvider);
+
       const appUser = await syncFirebaseUserWithBackend(result.user);
+
       setUser(appUser);
-    } catch (error: any) {
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        const email = error.customData?.email;
 
-        if (email) {
-          const methods = await fetchSignInMethodsForEmail(auth, email);
+    } catch (error: unknown) {
 
-          if (methods.includes('google.com')) {
-            const googleProvider = new GoogleAuthProvider();
-            const result = await signInWithPopup(auth, googleProvider);
-            await linkWithPopup(result.user, githubProvider);
-            const appUser = await syncFirebaseUserWithBackend(result.user);
-            setUser(appUser);
-            return;
-          }
+      // Verificamos que sea un objeto tipo Error de Firebase
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error
+      ) {
 
-          if (methods.includes('password')) {
-            throw new Error(
-              'Este correo ya tiene contraseña. Inicia sesión con email y luego vincula GitHub desde tu perfil.'
-            );
+        const firebaseError = error as {
+          code: string;
+          customData?: {
+            email?: string;
+          };
+          message?: string;
+        };
+
+        if (
+          firebaseError.code ===
+          'auth/account-exists-with-different-credential'
+        ) {
+
+          const email = firebaseError.customData?.email;
+
+          if (email) {
+
+            const methods = await fetchSignInMethodsForEmail(auth, email);
+
+            // 🔹 Cuenta existente con Google
+            if (methods.includes('google.com')) {
+
+              const googleProvider = new GoogleAuthProvider();
+
+              const result = await signInWithPopup(
+                auth,
+                googleProvider
+              );
+
+              await linkWithPopup(result.user, githubProvider);
+
+              const appUser =
+                await syncFirebaseUserWithBackend(result.user);
+
+              setUser(appUser);
+
+              return;
+            }
+
+            // 🔹 Cuenta existente con email/password
+            if (methods.includes('password')) {
+
+              throw new Error(
+                'Este correo ya tiene contraseña. Inicia sesión con email y luego vincula GitHub desde tu perfil.'
+              );
+            }
           }
         }
+
+        throw new Error(
+          firebaseError.message ??
+          'Error al iniciar sesión con GitHub'
+        );
       }
 
-      throw new Error(error.message ?? 'Error al iniciar sesión con GitHub');
+      // 🔹 Error desconocido
+      throw new Error(
+        'Ocurrió un error inesperado al iniciar sesión con GitHub'
+      );
     }
   };
 

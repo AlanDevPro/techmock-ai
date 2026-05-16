@@ -1,0 +1,1726 @@
+si tengo este codigo en mi fronted en mi ide:
+'use client'
+
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../../../contexts/AuthContext';
+import { useEffect, useState } from 'react';
+
+export default function IDEPage() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  useEffect(() => {
+    if (!user && !isLoggingOut) {
+      router.push('/auth');
+      return;
+    }
+  }, [user, isLoggingOut, router]);
+
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      await logout();
+      router.push('/');
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+    }
+  };
+
+  const handleOpenIDE = (framework: 'vuejs' | 'nextjs') => {
+    window.open(`http://localhost:3001?framework=${framework}`, '_blank');
+  };
+
+  const handleStart = (framework: 'vuejs' | 'nextjs') => {
+    handleOpenIDE(framework);
+  };
+
+  if (!user) return null;
+
+  return (
+    <div className="min-h-screen bg-black text-white flex flex-col">
+      {/* Header */}
+      <nav className="bg-gray-900/90 backdrop-blur-sm border-b border-gray-800 px-6 py-4 z-50">
+        <div className="flex items-center justify-between max-w-7xl mx-auto w-full">
+          <div className="flex items-center space-x-4">
+            <h1 className="text-2xl font-bold text-[#00ff00]">DEV_STREAM</h1>
+            <span className="text-gray-500">|</span>
+            <span className="text-gray-400">Prueba de Código</span>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <div className="text-sm text-gray-400">
+              {user.displayName || user.email}
+            </div>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm font-medium transition-colors"
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={handleLogout}
+              className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded text-sm font-medium transition-colors"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Contenedor Principal */}
+      <div className="flex-1 overflow-hidden flex flex-col items-center justify-center bg-gray-900 p-6 text-center">
+        <div className="max-w-4xl w-full">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-800 border border-gray-700 text-xs uppercase tracking-widest text-gray-400 mb-4">
+            Modo Prueba Activo
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">
+            Elige tu entorno de prueba
+          </h2>
+          <p className="text-gray-400 text-base md:text-lg">
+            Inicia el editor en una nueva ventana y resuelve los retos con el stack que prefieras.
+            Tu avance se guarda automaticamente y puedes volver cuando quieras.
+          </p>
+          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <button
+              onClick={() => handleStart('vuejs')}
+              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105"
+            >
+              ▶ Prueba con Vue.js
+            </button>
+            <button
+              onClick={() => handleStart('nextjs')}
+              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105"
+            >
+              ▶ Prueba con Next.js
+            </button>
+          </div>
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Duracion estimada</p>
+              <p className="text-lg text-white font-semibold">30 a 45 min</p>
+            </div>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Nivel sugerido</p>
+              <p className="text-lg text-white font-semibold">Intermedio / Avanzado</p>
+            </div>
+            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-500">Formato</p>
+              <p className="text-lg text-white font-semibold">Editor en vivo</p>
+            </div>
+          </div>
+          <p className="text-gray-500 mt-5 text-sm">
+            Se abrira el editor de codigo en una nueva ventana
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+y tengo estos codigos en mi rag:
+
+enpoints.py:
+from fastapi import APIRouter, HTTPException
+from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
+import os
+
+print("📦 Importando llm_service...")
+from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
+print("✅ llm_service importado")
+
+print("📦 Creando router...")
+router = APIRouter()
+print("✅ Router creado")
+
+# -----------------------------
+# 🔹 ARCHIVOS DE CONTEXTO
+# -----------------------------
+print("📦 Configurando rutas de archivos...")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VUE_FILE = os.path.join(BASE_DIR, "data", "vue_context.txt")
+NEXT_FILE = os.path.join(BASE_DIR, "data", "next_context.txt")
+print("✅ Rutas configuradas")
+
+
+def leer_archivo_interno(ruta: str) -> str:
+    print(f"📖 Leyendo archivo: {ruta}")
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+            print("✅ Archivo leído correctamente")
+            return contenido
+    except FileNotFoundError:
+        print("⚠️ Archivo no encontrado")
+        return "No existe conocimiento técnico indexado sobre este framework."
+
+
+# -----------------------------
+# 🔹 ENDPOINTS DE PREGUNTAS
+# -----------------------------
+@router.get("/generar-preguntas/vue", response_model=RespuestaEvaluacion)
+async def generar_preguntas_vue_get():
+    print("👉 Endpoint Vue llamado")
+    contexto = leer_archivo_interno(VUE_FILE)
+    return await generar_evaluacion_llm(contexto, "Vue.js")
+
+
+@router.get("/generar-preguntas/next", response_model=RespuestaEvaluacion)
+async def generar_preguntas_next_get():
+    print("👉 Endpoint Next llamado")
+    contexto = leer_archivo_interno(NEXT_FILE)
+    return await generar_evaluacion_llm(contexto, "Next.js")
+
+
+# -----------------------------
+# 🔥 ENDPOINT ANALIZAR CÓDIGO PRO
+# -----------------------------
+@router.post("/analizar-codigo", response_model=RespuestaAnalisisCodigo)
+async def analizar_codigo(data: dict):
+    print("👉 Endpoint analizar código llamado")
+
+    codigo = data.get("codigo", "").strip()
+    framework = data.get("framework", "general").strip()
+
+    if not codigo:
+        print("❌ Código vacío")
+        raise HTTPException(
+            status_code=400,
+            detail="El campo 'codigo' es requerido y no puede estar vacío."
+        )
+
+    if len(codigo) > 10_000:
+        print("❌ Código demasiado largo")
+        raise HTTPException(
+            status_code=413,
+            detail="El código excede el límite de 10,000 caracteres."
+        )
+
+    print("⏳ Enviando código a LLM...")
+    return await analizar_codigo_llm(codigo, framework)
+
+
+
+
+
+
+evaluations.py:
+from typing import Optional, List, Literal
+from pydantic import BaseModel, Field
+
+
+# -----------------------------
+# 🔹 RESPUESTA ENTREVISTA
+# -----------------------------
+class RespuestaEvaluacion(BaseModel):
+    pregunta_practica: Optional[str] = Field(
+        default="",
+        description="Enunciado de la prueba técnica"
+    )
+    comprension_a_evaluar: Optional[str] = Field(
+        default="",
+        description="Concepto técnico evaluado"
+    )
+    explicacion_codigo_esperado: Optional[str] = Field(
+        default="",
+        description="Explicación con código ideal"
+    )
+    error_por_falta_de_contexto: Optional[str] = Field(
+        default=None,
+        description="Error por falta de contexto"
+    )
+
+
+# -----------------------------
+# 🔥 CALIFICACIÓN GENERAL
+# -----------------------------
+class CalificacionGeneral(BaseModel):
+    nivel: str = Field(
+        description="Nivel del código: Excelente | Bueno | Regular | Deficiente | Crítico"
+    )
+    puntaje: int = Field(
+        description="Puntaje del 0 al 100"
+    )
+    resumen: str = Field(
+        description="Resumen ejecutivo del análisis con tono profesional y constructivo"
+    )
+
+
+# -----------------------------
+# 🔥 ERROR DETECTADO
+# -----------------------------
+class ErrorDetectado(BaseModel):
+    tipo: str = Field(
+        description="Categoría del error: Sintaxis | Lógica | Performance | Seguridad | Arquitectura | Estilo"
+    )
+    descripcion: str = Field(
+        description="Descripción clara del error encontrado"
+    )
+    impacto: Literal["alto", "medio", "bajo"] = Field(
+        description="Nivel de impacto del error"
+    )
+    linea_aproximada: Optional[str] = Field(
+        default=None,
+        description="Línea o sección aproximada donde ocurre el error"
+    )
+
+
+# -----------------------------
+# 🔥 RECOMENDACIÓN PRO
+# -----------------------------
+class RecomendacionItem(BaseModel):
+    mensaje: str = Field(
+        description="Problema detectado o área de mejora"
+    )
+    solucion: str = Field(
+        description="Solución concreta con ejemplo de código si aplica"
+    )
+    prioridad: Literal["alta", "media", "baja"] = Field(
+        description="Prioridad de implementación"
+    )
+
+
+# -----------------------------
+# 🔥 EVALUACIÓN TÉCNICA
+# -----------------------------
+class EvaluacionTecnica(BaseModel):
+    manejo_estado: str = Field(
+        description="Evaluación del manejo de estado y reactividad"
+    )
+    legibilidad: str = Field(
+        description="Claridad, nomenclatura y estructura del código"
+    )
+    arquitectura: str = Field(
+        description="Organización de componentes y separación de responsabilidades"
+    )
+    performance: str = Field(
+        description="Optimización, renders innecesarios, memory leaks, etc."
+    )
+
+
+# -----------------------------
+# 🔥 RESPUESTA ANÁLISIS PRO
+# -----------------------------
+class RespuestaAnalisisCodigo(BaseModel):
+    calificacion_general: CalificacionGeneral = Field(
+        description="Calificación global del código analizado"
+    )
+    errores: List[ErrorDetectado] = Field(
+        default_factory=list,
+        description="Lista detallada de errores encontrados"
+    )
+    buenas_practicas: List[str] = Field(
+        default_factory=list,
+        description="Prácticas positivas identificadas en el código"
+    )
+    malas_practicas: List[str] = Field(
+        default_factory=list,
+        description="Antipatrones o malas prácticas detectadas"
+    )
+    recomendaciones: List[RecomendacionItem] = Field(
+        default_factory=list,
+        description="Recomendaciones accionables con prioridad"
+    )
+    evaluacion_tecnica: EvaluacionTecnica = Field(
+        description="Evaluación técnica por dimensiones clave"
+    )
+
+
+
+
+
+
+llm_service.py:
+print("🔥 1 - inicio archivo")
+
+import json
+import re
+
+print("🔥 2 - json/re OK")
+
+from langchain_community.chat_models import ChatOllama
+print("🔥 3 - ChatOllama importado")
+
+from langchain_core.messages import SystemMessage, HumanMessage
+print("🔥 4 - messages importado")
+
+from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
+from app.core.prompts import get_junior_prompt
+
+print("🔥 5 - imports completos")
+
+
+
+# -----------------------------
+# 🔹 GENERAR PREGUNTAS
+# -----------------------------
+async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
+    print("🔥 6 - dentro de generar_evaluacion_llm")
+
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=500,
+        num_ctx=1536
+    )
+    print("🔥 7 - ChatOllama creado en generar_evaluacion_llm")
+
+    esquema = """
+{
+  "pregunta_practica": "string",
+  "comprension_a_evaluar": "string",
+  "explicacion_codigo_esperado": "string",
+  "error_por_falta_de_contexto": "string"
+}
+"""
+
+    system_prompt = get_junior_prompt(framework)
+
+    prompt_completo = f"""
+{system_prompt}
+
+⚠ Responde SOLO en JSON válido.
+NO agregues texto fuera del JSON.
+
+Formato obligatorio:
+{esquema}
+"""
+
+    messages = [
+        SystemMessage(content=prompt_completo),
+        HumanMessage(content=f"Contexto técnico:\n{contexto[:1500]}")
+    ]
+    print("🔥 8 - messages preparados, antes de llm.ainvoke")
+
+    try:
+        respuesta = await llm.ainvoke(messages)
+        print("🔥 9 - llm.ainvoke completado")
+        data = _safe_json_load(respuesta.content)
+
+        return {
+            "pregunta_practica": data.get("pregunta_practica", ""),
+            "comprension_a_evaluar": data.get("comprension_a_evaluar", ""),
+            "explicacion_codigo_esperado": data.get("explicacion_codigo_esperado", ""),
+            "error_por_falta_de_contexto": data.get("error_por_falta_de_contexto", "")
+        }
+
+    except Exception as e:
+        print("❌ ERROR GENERANDO PREGUNTAS:", e)
+        return {
+            "pregunta_practica": "",
+            "comprension_a_evaluar": "",
+            "explicacion_codigo_esperado": "",
+            "error_por_falta_de_contexto": f"Error JSON: {str(e)}",
+        }
+
+
+# -----------------------------
+# 🔥 ANALIZAR CÓDIGO (PRO FEEDBACK)
+# -----------------------------
+async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
+    print("🔥 10 - dentro de analizar_codigo_llm")
+    print("⚡ Iniciando análisis profesional de código...")
+
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=800,
+        num_ctx=2048
+    )
+    print("🔥 11 - ChatOllama creado en analizar_codigo_llm")
+
+    esquema = """
+{
+  "calificacion_general": {
+    "nivel": "Excelente | Bueno | Regular | Deficiente | Crítico",
+    "puntaje": 0,
+    "resumen": "string"
+  },
+  "errores": [
+    {
+      "tipo": "Sintaxis | Lógica | Performance | Seguridad | Arquitectura | Estilo",
+      "descripcion": "string",
+      "impacto": "alto | medio | bajo",
+      "linea_aproximada": "string"
+    }
+  ],
+  "buenas_practicas": ["string"],
+  "malas_practicas": ["string"],
+  "recomendaciones": [
+    {
+      "mensaje": "string",
+      "solucion": "string",
+      "prioridad": "alta | media | baja"
+    }
+  ],
+  "evaluacion_tecnica": {
+    "manejo_estado": "string",
+    "legibilidad": "string",
+    "arquitectura": "string",
+    "performance": "string"
+  }
+}
+"""
+
+    prompt = f"""
+Eres un ingeniero senior con 10+ años de experiencia en revisión de código frontend.
+Tu objetivo es dar un feedback profesional, constructivo y accionable.
+
+Analiza el código {framework} enviado por el usuario y responde ÚNICAMENTE en JSON válido.
+
+⚠ REGLAS CRÍTICAS:
+
+1. calificacion_general.nivel DEBE ser uno de: "Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
+2. calificacion_general.puntaje DEBE ser un número entero del 0 al 100
+3. calificacion_general.resumen → párrafo con tono profesional y constructivo
+4. errores → lista de objetos con: tipo, descripcion, impacto, linea_aproximada
+5. buenas_practicas → SOLO strings (prácticas positivas encontradas)
+6. malas_practicas → SOLO strings (antipatrones o malos hábitos detectados)
+7. recomendaciones → lista de objetos con: mensaje, solucion, prioridad
+8. evaluacion_tecnica → objeto con: manejo_estado, legibilidad, arquitectura, performance
+
+ESCALA DE PUNTAJE:
+- 90-100 → Excelente
+- 70-89  → Bueno
+- 50-69  → Regular
+- 30-49  → Deficiente
+- 0-29   → Crítico
+
+❌ NUNCA mezcles tipos:
+"errores": [{{"mensaje": "..."}}]  ← MAL
+"buenas_practicas": [{{"texto": "..."}}]  ← MAL
+
+✅ SIEMPRE:
+"buenas_practicas": ["texto", "texto"]  ← BIEN
+"malas_practicas": ["texto", "texto"]   ← BIEN
+
+Formato obligatorio:
+{esquema}
+"""
+
+    codigo_recortado = codigo[:2500]
+
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=f"Analiza este código {framework}:\n\n{codigo_recortado}")
+    ]
+    print("🔥 12 - messages preparados en analizar_codigo_llm, antes de llm.ainvoke")
+
+    try:
+        respuesta = await llm.ainvoke(messages)
+        print("🔥 13 - llm.ainvoke completado en analizar_codigo_llm")
+
+        print("🧠 RAW LLM:", respuesta.content[:300])
+
+        data = _safe_json_load(respuesta.content)
+
+        return _construir_respuesta_analisis(data)
+
+    except Exception as e:
+        print("❌ ERROR EN ANÁLISIS PRO:", e)
+        return _respuesta_error_analisis(str(e))
+
+
+# -----------------------------
+# 🧠 CONSTRUCCIÓN RESPUESTA PRO
+# -----------------------------
+
+def _construir_respuesta_analisis(data: dict) -> dict:
+    """Construye y normaliza la respuesta completa del análisis pro."""
+    print("🔥 14 - dentro de _construir_respuesta_analisis")
+
+    cal = data.get("calificacion_general", {})
+
+    return {
+        "calificacion_general": {
+            "nivel": _normalizar_nivel(cal.get("nivel", "Regular")),
+            "puntaje": _normalizar_puntaje(cal.get("puntaje", 50)),
+            "resumen": cal.get("resumen", "No se pudo generar un resumen.")
+        },
+        "errores": _normalizar_errores_pro(data.get("errores")),
+        "buenas_practicas": _asegurar_lista_strings(data.get("buenas_practicas")),
+        "malas_practicas": _asegurar_lista_strings(data.get("malas_practicas")),
+        "recomendaciones": _normalizar_recomendaciones_pro(data.get("recomendaciones")),
+        "evaluacion_tecnica": _normalizar_evaluacion_tecnica(data.get("evaluacion_tecnica"))
+    }
+
+
+def _respuesta_error_analisis(error: str) -> dict:
+    """Respuesta de fallback cuando hay un error interno."""
+    print("🔥 15 - dentro de _respuesta_error_analisis")
+    return {
+        "calificacion_general": {
+            "nivel": "Crítico",
+            "puntaje": 0,
+            "resumen": "No fue posible analizar el código. Verifica que sea código válido e intenta nuevamente."
+        },
+        "errores": [
+            {
+                "tipo": "Sistema",
+                "descripcion": f"Error interno del analizador: {error}",
+                "impacto": "alto",
+                "linea_aproximada": None
+            }
+        ],
+        "buenas_practicas": [],
+        "malas_practicas": [],
+        "recomendaciones": [
+            {
+                "mensaje": "El código no pudo ser procesado.",
+                "solucion": "Asegúrate de enviar código válido y legible.",
+                "prioridad": "alta"
+            }
+        ],
+        "evaluacion_tecnica": {
+            "manejo_estado": "No evaluado",
+            "legibilidad": "No evaluado",
+            "arquitectura": "No evaluado",
+            "performance": "No evaluado"
+        }
+    }
+
+
+# -----------------------------
+# 🧠 UTILIDADES DE NORMALIZACIÓN
+# -----------------------------
+
+NIVELES_VALIDOS = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"}
+IMPACTOS_VALIDOS = {"alto", "medio", "bajo"}
+PRIORIDADES_VALIDAS = {"alta", "media", "baja"}
+
+
+def _normalizar_nivel(nivel: str) -> str:
+    if nivel in NIVELES_VALIDOS:
+        return nivel
+    nivel_lower = nivel.lower()
+    mapa = {
+        "excellent": "Excelente", "good": "Bueno", "regular": "Regular",
+        "deficient": "Deficiente", "critical": "Crítico"
+    }
+    return mapa.get(nivel_lower, "Regular")
+
+
+def _normalizar_puntaje(puntaje) -> int:
+    try:
+        p = int(puntaje)
+        return max(0, min(100, p))
+    except (ValueError, TypeError):
+        return 50
+
+
+def _asegurar_lista_strings(valor) -> list:
+    if not isinstance(valor, list):
+        return []
+    result = []
+    for item in valor:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict):
+            # Extraer cualquier campo de texto si viene como objeto por error
+            for key in ("mensaje", "descripcion", "texto", "text"):
+                if key in item:
+                    result.append(str(item[key]))
+                    break
+    return result
+
+
+def _normalizar_errores_pro(lista) -> list:
+    """Normaliza la lista de errores al formato ErrorDetectado."""
+    if not isinstance(lista, list):
+        return []
+
+    resultado = []
+    for item in lista:
+        if isinstance(item, dict):
+            impacto = item.get("impacto", "medio")
+            if impacto not in IMPACTOS_VALIDOS:
+                impacto = "medio"
+            resultado.append({
+                "tipo": item.get("tipo", "General"),
+                "descripcion": item.get("descripcion", item.get("mensaje", "Error no especificado")),
+                "impacto": impacto,
+                "linea_aproximada": item.get("linea_aproximada", None)
+            })
+        elif isinstance(item, str):
+            resultado.append({
+                "tipo": "General",
+                "descripcion": item,
+                "impacto": "medio",
+                "linea_aproximada": None
+            })
+    return resultado
+
+
+def _normalizar_recomendaciones_pro(lista) -> list:
+    """Normaliza la lista de recomendaciones al formato RecomendacionItem pro."""
+    if not isinstance(lista, list):
+        return []
+
+    resultado = []
+    for item in lista:
+        if isinstance(item, dict):
+            prioridad = item.get("prioridad", "media")
+            if prioridad not in PRIORIDADES_VALIDAS:
+                prioridad = "media"
+            resultado.append({
+                "mensaje": item.get("mensaje", "Sin mensaje"),
+                "solucion": item.get("solucion", "Sin solución"),
+                "prioridad": prioridad
+            })
+        elif isinstance(item, str):
+            resultado.append({
+                "mensaje": item,
+                "solucion": "No especificada",
+                "prioridad": "media"
+            })
+    return resultado
+
+
+def _normalizar_evaluacion_tecnica(data) -> dict:
+    """Garantiza que evaluacion_tecnica tenga todos sus campos."""
+    base = {
+        "manejo_estado": "No evaluado",
+        "legibilidad": "No evaluado",
+        "arquitectura": "No evaluado",
+        "performance": "No evaluado"
+    }
+    if isinstance(data, dict):
+        for key in base:
+            if data.get(key):
+                base[key] = str(data[key])
+    return base
+
+
+def _safe_json_load(texto: str) -> dict:
+    try:
+        return json.loads(texto)
+    except Exception:
+        match = re.search(r"\{.*\}", texto, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                pass
+
+    print("⚠ JSON inválido del LLM, devolviendo vacío")
+    return {}
+
+
+ya teniendo todo ese contexto de mis codigos tanto en mi backend como en mi rag para  que mi modelo me genere una pregunta de entrevista segun la tecnologia dime si esta bien considerando que aun no esta conectados nada con mi base de datos pero quieo que este conectados con esta base de datos: 
+
+-- =========================
+-- EMPRESA
+-- =========================
+CREATE TABLE empresa (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    logo_url TEXT,
+    descripcion TEXT,
+    sitio_web VARCHAR(200),
+    email_contacto VARCHAR(150),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================
+-- USUARIOS (CON LAS MODIFICACIONES)
+-- =========================
+CREATE TABLE usuarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nombre VARCHAR(100) NOT NULL,
+    apellido VARCHAR(100),
+    email VARCHAR(150) UNIQUE NOT NULL,
+    rol VARCHAR(20) NOT NULL,
+    avatar_url TEXT,
+    github_url VARCHAR(200),
+    linkedin_url VARCHAR(200),
+    telefono VARCHAR(30),
+    activo BOOLEAN DEFAULT TRUE,
+    email_verificado BOOLEAN DEFAULT FALSE,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ultimo_acceso TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ultimo_login TIMESTAMP
+);
+
+
+
+CREATE TABLE auth_providers (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    provider VARCHAR(20) NOT NULL,
+    provider_uid TEXT,
+    password_hash TEXT,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- 🔥 reglas anti-duplicados profesionales
+    UNIQUE(provider, provider_uid),
+    UNIQUE(user_id, provider),
+
+    FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+
+
+ALTER TABLE auth_providers
+ADD CONSTRAINT provider_password_logic
+CHECK (
+    (provider = 'password' AND password_hash IS NOT NULL)
+    OR
+    (provider != 'password' AND password_hash IS NULL)
+);
+
+
+
+CREATE INDEX idx_users_email ON usuarios(email);
+CREATE INDEX idx_auth_provider_uid ON auth_providers(provider, provider_uid);
+CREATE INDEX idx_auth_user_provider ON auth_providers(user_id, provider);
+
+
+
+-- =========================
+-- TOKENS (CON LAS MODIFICACIONES)
+-- =========================
+CREATE TABLE refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    usuario_id UUID NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    dispositivo VARCHAR(200),
+    ip VARCHAR(45),
+    expires_at TIMESTAMP NOT NULL,
+    revocado BOOLEAN DEFAULT FALSE,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+);
+
+
+-- =========================
+-- TECNOLOGIAS
+-- =========================
+CREATE TABLE tecnologias (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    slug VARCHAR(50) UNIQUE NOT NULL,
+    tipo VARCHAR(30) NOT NULL,
+    version_actual VARCHAR(20),
+    icono_url TEXT,
+    activo BOOLEAN DEFAULT TRUE,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================
+-- NIVELES
+-- =========================
+CREATE TABLE niveles_dificultad (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(30) NOT NULL,
+    descripcion TEXT,
+    multiplicador_puntaje DECIMAL(3,2) DEFAULT 1.0
+);
+
+-- =========================
+-- PREGUNTAS
+-- =========================
+CREATE TABLE preguntas (
+    id SERIAL PRIMARY KEY,
+    tecnologia_id INT NOT NULL,
+    nivel_id INT NOT NULL,
+    titulo VARCHAR(300) NOT NULL,
+    enunciado TEXT NOT NULL,
+    tipo VARCHAR(30) NOT NULL,
+    tiempo_estimado_min INT DEFAULT 30,
+    activa BOOLEAN DEFAULT TRUE,
+    generada_por_ia BOOLEAN DEFAULT FALSE,
+    prompt_contexto TEXT,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    creada_por UUID,
+
+    FOREIGN KEY (tecnologia_id) REFERENCES tecnologias(id),
+    FOREIGN KEY (nivel_id) REFERENCES niveles_dificultad(id),
+    FOREIGN KEY (creada_por) REFERENCES usuarios(id)
+);
+
+-- =========================
+-- RUBRICAS
+-- =========================
+CREATE TABLE rubricas (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    descripcion TEXT,
+    peso_porcentual DECIMAL(5,2) NOT NULL,
+    activa BOOLEAN DEFAULT TRUE
+);
+
+-- =========================
+-- SESIONES
+-- =========================
+CREATE TABLE sesiones_entrevista (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    usuario_id UUID NOT NULL,
+    tecnologia_id INT NOT NULL,
+    nivel_id INT NOT NULL,
+    pregunta_id INT NOT NULL,
+    estado VARCHAR(30) DEFAULT 'en_progreso',
+    fecha_inicio TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_fin TIMESTAMP,
+    duracion_segundos INT,
+    tiempo_limite_segundos INT DEFAULT 3600,
+    ip_usuario VARCHAR(45),
+    user_agent TEXT,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (tecnologia_id) REFERENCES tecnologias(id),
+    FOREIGN KEY (nivel_id) REFERENCES niveles_dificultad(id),
+    FOREIGN KEY (pregunta_id) REFERENCES preguntas(id)
+);
+
+-- =========================
+-- MENSAJES
+-- =========================
+CREATE TABLE mensajes (
+    id BIGSERIAL PRIMARY KEY,
+    sesion_id UUID NOT NULL,
+    rol VARCHAR(10) NOT NULL,
+    contenido TEXT NOT NULL,
+    tokens_usados INT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (sesion_id) REFERENCES sesiones_entrevista(id) ON DELETE CASCADE
+);
+
+-- =========================
+-- CODIGO
+-- =========================
+CREATE TABLE envios_codigo (
+    id BIGSERIAL PRIMARY KEY,
+    sesion_id UUID NOT NULL,
+    lenguaje VARCHAR(50) NOT NULL,
+    codigo TEXT NOT NULL,
+    es_envio_final BOOLEAN DEFAULT FALSE,
+    version INT DEFAULT 1,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (sesion_id) REFERENCES sesiones_entrevista(id) ON DELETE CASCADE
+);
+
+-- =========================
+-- EJECUCIONES
+-- =========================
+CREATE TABLE ejecuciones_ide (
+    id BIGSERIAL PRIMARY KEY,
+    sesion_id UUID NOT NULL,
+    envio_codigo_id BIGINT,
+    kubernetes_job_name VARCHAR(200),
+    kubernetes_namespace VARCHAR(100),
+    estado VARCHAR(30) DEFAULT 'pending',
+    payload_enviado JSON,
+    stdout TEXT,
+    stderr TEXT,
+    exit_code INT,
+    tiempo_ejecucion_ms INT,
+    memoria_usada_mb DECIMAL(8,2),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_completado TIMESTAMP,
+
+    FOREIGN KEY (sesion_id) REFERENCES sesiones_entrevista(id),
+    FOREIGN KEY (envio_codigo_id) REFERENCES envios_codigo(id)
+);
+
+-- =========================
+-- EVALUACIONES
+-- =========================
+CREATE TABLE evaluaciones (
+    id SERIAL PRIMARY KEY,
+    sesion_id UUID UNIQUE NOT NULL,
+    puntaje_total DECIMAL(5,2),
+    feedback_general TEXT NOT NULL,
+    fortalezas TEXT,
+    areas_mejora TEXT,
+    sugerencias_recursos TEXT,
+    generado_por_ia BOOLEAN DEFAULT TRUE,
+    modelo_ia_usado VARCHAR(100),
+    tokens_evaluacion INT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (sesion_id) REFERENCES sesiones_entrevista(id) ON DELETE CASCADE
+);
+
+-- =========================
+-- DETALLE EVALUACION
+-- =========================
+CREATE TABLE detalle_evaluacion (
+    id SERIAL PRIMARY KEY,
+    evaluacion_id INT NOT NULL,
+    rubrica_id INT NOT NULL,
+    puntaje DECIMAL(5,2) NOT NULL,
+    comentario TEXT,
+
+    UNIQUE (evaluacion_id, rubrica_id),
+
+    FOREIGN KEY (evaluacion_id) REFERENCES evaluaciones(id) ON DELETE CASCADE,
+    FOREIGN KEY (rubrica_id) REFERENCES rubricas(id)
+);
+
+-- =========================
+-- ESTADISTICAS
+-- =========================
+CREATE TABLE estadisticas_usuario (
+    id SERIAL PRIMARY KEY,
+    usuario_id UUID UNIQUE NOT NULL,
+    total_entrevistas INT DEFAULT 0,
+    entrevistas_finalizadas INT DEFAULT 0,
+    entrevistas_abandonadas INT DEFAULT 0,
+    puntaje_promedio DECIMAL(5,2),
+    mejor_puntaje DECIMAL(5,2),
+    peor_puntaje DECIMAL(5,2),
+    tiempo_promedio_segundos INT,
+    tecnologia_favorita_id INT,
+    racha_actual INT DEFAULT 0,
+    racha_maxima INT DEFAULT 0,
+    ultima_entrevista_fecha TIMESTAMP,
+    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (tecnologia_favorita_id) REFERENCES tecnologias(id)
+);
+
+-- =========================
+-- CONTACTOS
+-- =========================
+CREATE TABLE contactos_reclutamiento (
+    id SERIAL PRIMARY KEY,
+    admin_id UUID NOT NULL,
+    developer_id UUID NOT NULL,
+    sesion_entrevista_id UUID,
+    asunto VARCHAR(300) NOT NULL,
+    mensaje TEXT NOT NULL,
+    estado VARCHAR(30) DEFAULT 'enviado',
+    respuesta_developer TEXT,
+    fecha_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (admin_id) REFERENCES usuarios(id),
+    FOREIGN KEY (developer_id) REFERENCES usuarios(id),
+    FOREIGN KEY (sesion_entrevista_id) REFERENCES sesiones_entrevista(id)
+);
+
+-- =========================
+-- NOTIFICACIONES
+-- =========================
+CREATE TABLE notificaciones (
+    id BIGSERIAL PRIMARY KEY,
+    usuario_id UUID NOT NULL,
+    tipo VARCHAR(50) NOT NULL,
+    titulo VARCHAR(200) NOT NULL,
+    mensaje TEXT,
+    leida BOOLEAN DEFAULT FALSE,
+    url_accion VARCHAR(300),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);
+
+
+
+dime que archivos tendria que cambiar para que pueda guardar algunas cosas en mi base de datos 
+
+
+
+
+
+
+
+
+
+
+
+Rag/
+
+├── .env                          # 🟢 NUEVO - variables de entorno
+
+├── .env.example                  # 🟢 NUEVO - plantilla pública
+
+├── README.md
+
+├── requirements.txt              # 🟡 MODIFICAR
+
+├── run.py
+
+├── alembic.ini                   # 🟢 NUEVO - migraciones de DB
+
+│
+
+├── alembic/                      # 🟢 NUEVO - carpeta de migraciones
+
+│   ├── env.py
+
+│   └── versions/
+
+│
+
+└── app/
+
+    ├── main.py                   # 🟡 MODIFICAR - agregar lifespan/startup
+
+    │
+
+    ├── api/
+
+    │   ├── __init__.py
+
+    │   ├── endpoints.py          # 🟡 MODIFICAR - inyectar DB session
+
+    │   └── deps.py               # 🟢 NUEVO - get_db() como dependencia
+
+    │
+
+    ├── core/
+
+    │   ├── config.py             # 🟢 NUEVO - Settings con pydantic-settings
+
+    │   └── prompts.py            # ✅ sin cambios
+
+    │
+
+    ├── db/                       # 🟢 NUEVO - carpeta completa
+
+    │   ├── __init__.py
+
+    │   ├── database.py           # engine async, SessionLocal
+
+    │   ├── models.py             # tablas ORM (preguntas, sesiones, evaluaciones)
+
+    │   └── repositories.py      # funciones CRUD
+
+    │
+
+    ├── schemas/
+
+    │   ├── __init__.py
+
+    │   └── evaluations.py        # 🟡 MODIFICAR - agregar sesion_id
+
+    │
+
+    ├── services/
+
+    │   ├── __init__.py
+
+    │   └── llm_service.py        # ✅ sin cambios
+
+    │
+
+    ├── models/                   # (si tenés modelos Pydantic separados)
+
+    └── data/
+
+        ├── vue_context.txt       # ✅ sin cambios
+
+        └── next_context.txt      # ✅ sin cambios  
+        
+        
+si tengo esta nueva estructura de mi RAG quiero qeu me des los codigos completo de los nuevos archivo que me diste y tambien los __init__.py  considerando que ya tengo esos codigos sin archivo: __init__.py que tengo los codigos: 
+app/api/enpoints.py:
+from fastapi import APIRouter, HTTPException
+from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
+import os
+
+print("📦 Importando llm_service...")
+from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
+print("✅ llm_service importado")
+
+print("📦 Creando router...")
+router = APIRouter()
+print("✅ Router creado")
+
+# -----------------------------
+# 🔹 ARCHIVOS DE CONTEXTO
+# -----------------------------
+print("📦 Configurando rutas de archivos...")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VUE_FILE = os.path.join(BASE_DIR, "data", "vue_context.txt")
+NEXT_FILE = os.path.join(BASE_DIR, "data", "next_context.txt")
+print("✅ Rutas configuradas")
+
+
+def leer_archivo_interno(ruta: str) -> str:
+    print(f"📖 Leyendo archivo: {ruta}")
+    try:
+        with open(ruta, 'r', encoding='utf-8') as f:
+            contenido = f.read()
+            print("✅ Archivo leído correctamente")
+            return contenido
+    except FileNotFoundError:
+        print("⚠️ Archivo no encontrado")
+        return "No existe conocimiento técnico indexado sobre este framework."
+
+
+# -----------------------------
+# 🔹 ENDPOINTS DE PREGUNTAS
+# -----------------------------
+@router.get("/generar-preguntas/vue", response_model=RespuestaEvaluacion)
+async def generar_preguntas_vue_get():
+    print("👉 Endpoint Vue llamado")
+    contexto = leer_archivo_interno(VUE_FILE)
+    return await generar_evaluacion_llm(contexto, "Vue.js")
+
+
+@router.get("/generar-preguntas/next", response_model=RespuestaEvaluacion)
+async def generar_preguntas_next_get():
+    print("👉 Endpoint Next llamado")
+    contexto = leer_archivo_interno(NEXT_FILE)
+    return await generar_evaluacion_llm(contexto, "Next.js")
+
+
+# -----------------------------
+# 🔥 ENDPOINT ANALIZAR CÓDIGO PRO
+# -----------------------------
+@router.post("/analizar-codigo", response_model=RespuestaAnalisisCodigo)
+async def analizar_codigo(data: dict):
+    print("👉 Endpoint analizar código llamado")
+
+    codigo = data.get("codigo", "").strip()
+    framework = data.get("framework", "general").strip()
+
+    if not codigo:
+        print("❌ Código vacío")
+        raise HTTPException(
+            status_code=400,
+            detail="El campo 'codigo' es requerido y no puede estar vacío."
+        )
+
+    if len(codigo) > 10_000:
+        print("❌ Código demasiado largo")
+        raise HTTPException(
+            status_code=413,
+            detail="El código excede el límite de 10,000 caracteres."
+        )
+
+    print("⏳ Enviando código a LLM...")
+    return await analizar_codigo_llm(codigo, framework)
+
+
+
+
+
+app/schemas/evaluations.py:
+
+from typing import Optional, List, Literal
+from pydantic import BaseModel, Field
+
+
+# -----------------------------
+# 🔹 RESPUESTA ENTREVISTA
+# -----------------------------
+class RespuestaEvaluacion(BaseModel):
+    pregunta_practica: Optional[str] = Field(
+        default="",
+        description="Enunciado de la prueba técnica"
+    )
+    comprension_a_evaluar: Optional[str] = Field(
+        default="",
+        description="Concepto técnico evaluado"
+    )
+    explicacion_codigo_esperado: Optional[str] = Field(
+        default="",
+        description="Explicación con código ideal"
+    )
+    error_por_falta_de_contexto: Optional[str] = Field(
+        default=None,
+        description="Error por falta de contexto"
+    )
+
+
+# -----------------------------
+# 🔥 CALIFICACIÓN GENERAL
+# -----------------------------
+class CalificacionGeneral(BaseModel):
+    nivel: str = Field(
+        description="Nivel del código: Excelente | Bueno | Regular | Deficiente | Crítico"
+    )
+    puntaje: int = Field(
+        description="Puntaje del 0 al 100"
+    )
+    resumen: str = Field(
+        description="Resumen ejecutivo del análisis con tono profesional y constructivo"
+    )
+
+
+# -----------------------------
+# 🔥 ERROR DETECTADO
+# -----------------------------
+class ErrorDetectado(BaseModel):
+    tipo: str = Field(
+        description="Categoría del error: Sintaxis | Lógica | Performance | Seguridad | Arquitectura | Estilo"
+    )
+    descripcion: str = Field(
+        description="Descripción clara del error encontrado"
+    )
+    impacto: Literal["alto", "medio", "bajo"] = Field(
+        description="Nivel de impacto del error"
+    )
+    linea_aproximada: Optional[str] = Field(
+        default=None,
+        description="Línea o sección aproximada donde ocurre el error"
+    )
+
+
+# -----------------------------
+# 🔥 RECOMENDACIÓN PRO
+# -----------------------------
+class RecomendacionItem(BaseModel):
+    mensaje: str = Field(
+        description="Problema detectado o área de mejora"
+    )
+    solucion: str = Field(
+        description="Solución concreta con ejemplo de código si aplica"
+    )
+    prioridad: Literal["alta", "media", "baja"] = Field(
+        description="Prioridad de implementación"
+    )
+
+
+# -----------------------------
+# 🔥 EVALUACIÓN TÉCNICA
+# -----------------------------
+class EvaluacionTecnica(BaseModel):
+    manejo_estado: str = Field(
+        description="Evaluación del manejo de estado y reactividad"
+    )
+    legibilidad: str = Field(
+        description="Claridad, nomenclatura y estructura del código"
+    )
+    arquitectura: str = Field(
+        description="Organización de componentes y separación de responsabilidades"
+    )
+    performance: str = Field(
+        description="Optimización, renders innecesarios, memory leaks, etc."
+    )
+
+
+# -----------------------------
+# 🔥 RESPUESTA ANÁLISIS PRO
+# -----------------------------
+class RespuestaAnalisisCodigo(BaseModel):
+    calificacion_general: CalificacionGeneral = Field(
+        description="Calificación global del código analizado"
+    )
+    errores: List[ErrorDetectado] = Field(
+        default_factory=list,
+        description="Lista detallada de errores encontrados"
+    )
+    buenas_practicas: List[str] = Field(
+        default_factory=list,
+        description="Prácticas positivas identificadas en el código"
+    )
+    malas_practicas: List[str] = Field(
+        default_factory=list,
+        description="Antipatrones o malas prácticas detectadas"
+    )
+    recomendaciones: List[RecomendacionItem] = Field(
+        default_factory=list,
+        description="Recomendaciones accionables con prioridad"
+    )
+    evaluacion_tecnica: EvaluacionTecnica = Field(
+        description="Evaluación técnica por dimensiones clave"
+    )
+
+
+
+
+
+
+app/services/llm_service.py:
+
+print("🔥 1 - inicio archivo")
+
+import json
+import re
+
+print("🔥 2 - json/re OK")
+
+from langchain_community.chat_models import ChatOllama
+print("🔥 3 - ChatOllama importado")
+
+from langchain_core.messages import SystemMessage, HumanMessage
+print("🔥 4 - messages importado")
+
+from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
+from app.core.prompts import get_junior_prompt
+
+print("🔥 5 - imports completos")
+
+
+
+# -----------------------------
+# 🔹 GENERAR PREGUNTAS
+# -----------------------------
+async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
+    print("🔥 6 - dentro de generar_evaluacion_llm")
+
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=500,
+        num_ctx=1536
+    )
+    print("🔥 7 - ChatOllama creado en generar_evaluacion_llm")
+
+    esquema = """
+{
+  "pregunta_practica": "string",
+  "comprension_a_evaluar": "string",
+  "explicacion_codigo_esperado": "string",
+  "error_por_falta_de_contexto": "string"
+}
+"""
+
+    system_prompt = get_junior_prompt(framework)
+
+    prompt_completo = f"""
+{system_prompt}
+
+⚠ Responde SOLO en JSON válido.
+NO agregues texto fuera del JSON.
+
+Formato obligatorio:
+{esquema}
+"""
+
+    messages = [
+        SystemMessage(content=prompt_completo),
+        HumanMessage(content=f"Contexto técnico:\n{contexto[:1500]}")
+    ]
+    print("🔥 8 - messages preparados, antes de llm.ainvoke")
+
+    try:
+        respuesta = await llm.ainvoke(messages)
+        print("🔥 9 - llm.ainvoke completado")
+        data = _safe_json_load(respuesta.content)
+
+        return {
+            "pregunta_practica": data.get("pregunta_practica", ""),
+            "comprension_a_evaluar": data.get("comprension_a_evaluar", ""),
+            "explicacion_codigo_esperado": data.get("explicacion_codigo_esperado", ""),
+            "error_por_falta_de_contexto": data.get("error_por_falta_de_contexto", "")
+        }
+
+    except Exception as e:
+        print("❌ ERROR GENERANDO PREGUNTAS:", e)
+        return {
+            "pregunta_practica": "",
+            "comprension_a_evaluar": "",
+            "explicacion_codigo_esperado": "",
+            "error_por_falta_de_contexto": f"Error JSON: {str(e)}",
+        }
+
+
+# -----------------------------
+# 🔥 ANALIZAR CÓDIGO (PRO FEEDBACK)
+# -----------------------------
+async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
+    print("🔥 10 - dentro de analizar_codigo_llm")
+    print("⚡ Iniciando análisis profesional de código...")
+
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=800,
+        num_ctx=2048
+    )
+    print("🔥 11 - ChatOllama creado en analizar_codigo_llm")
+
+    esquema = """
+{
+  "calificacion_general": {
+    "nivel": "Excelente | Bueno | Regular | Deficiente | Crítico",
+    "puntaje": 0,
+    "resumen": "string"
+  },
+  "errores": [
+    {
+      "tipo": "Sintaxis | Lógica | Performance | Seguridad | Arquitectura | Estilo",
+      "descripcion": "string",
+      "impacto": "alto | medio | bajo",
+      "linea_aproximada": "string"
+    }
+  ],
+  "buenas_practicas": ["string"],
+  "malas_practicas": ["string"],
+  "recomendaciones": [
+    {
+      "mensaje": "string",
+      "solucion": "string",
+      "prioridad": "alta | media | baja"
+    }
+  ],
+  "evaluacion_tecnica": {
+    "manejo_estado": "string",
+    "legibilidad": "string",
+    "arquitectura": "string",
+    "performance": "string"
+  }
+}
+"""
+
+    prompt = f"""
+Eres un ingeniero senior con 10+ años de experiencia en revisión de código frontend.
+Tu objetivo es dar un feedback profesional, constructivo y accionable.
+
+Analiza el código {framework} enviado por el usuario y responde ÚNICAMENTE en JSON válido.
+
+⚠ REGLAS CRÍTICAS:
+
+1. calificacion_general.nivel DEBE ser uno de: "Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
+2. calificacion_general.puntaje DEBE ser un número entero del 0 al 100
+3. calificacion_general.resumen → párrafo con tono profesional y constructivo
+4. errores → lista de objetos con: tipo, descripcion, impacto, linea_aproximada
+5. buenas_practicas → SOLO strings (prácticas positivas encontradas)
+6. malas_practicas → SOLO strings (antipatrones o malos hábitos detectados)
+7. recomendaciones → lista de objetos con: mensaje, solucion, prioridad
+8. evaluacion_tecnica → objeto con: manejo_estado, legibilidad, arquitectura, performance
+
+ESCALA DE PUNTAJE:
+- 90-100 → Excelente
+- 70-89  → Bueno
+- 50-69  → Regular
+- 30-49  → Deficiente
+- 0-29   → Crítico
+
+❌ NUNCA mezcles tipos:
+"errores": [{{"mensaje": "..."}}]  ← MAL
+"buenas_practicas": [{{"texto": "..."}}]  ← MAL
+
+✅ SIEMPRE:
+"buenas_practicas": ["texto", "texto"]  ← BIEN
+"malas_practicas": ["texto", "texto"]   ← BIEN
+
+Formato obligatorio:
+{esquema}
+"""
+
+    codigo_recortado = codigo[:2500]
+
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=f"Analiza este código {framework}:\n\n{codigo_recortado}")
+    ]
+    print("🔥 12 - messages preparados en analizar_codigo_llm, antes de llm.ainvoke")
+
+    try:
+        respuesta = await llm.ainvoke(messages)
+        print("🔥 13 - llm.ainvoke completado en analizar_codigo_llm")
+
+        print("🧠 RAW LLM:", respuesta.content[:300])
+
+        data = _safe_json_load(respuesta.content)
+
+        return _construir_respuesta_analisis(data)
+
+    except Exception as e:
+        print("❌ ERROR EN ANÁLISIS PRO:", e)
+        return _respuesta_error_analisis(str(e))
+
+
+# -----------------------------
+# 🧠 CONSTRUCCIÓN RESPUESTA PRO
+# -----------------------------
+
+def _construir_respuesta_analisis(data: dict) -> dict:
+    """Construye y normaliza la respuesta completa del análisis pro."""
+    print("🔥 14 - dentro de _construir_respuesta_analisis")
+
+    cal = data.get("calificacion_general", {})
+
+    return {
+        "calificacion_general": {
+            "nivel": _normalizar_nivel(cal.get("nivel", "Regular")),
+            "puntaje": _normalizar_puntaje(cal.get("puntaje", 50)),
+            "resumen": cal.get("resumen", "No se pudo generar un resumen.")
+        },
+        "errores": _normalizar_errores_pro(data.get("errores")),
+        "buenas_practicas": _asegurar_lista_strings(data.get("buenas_practicas")),
+        "malas_practicas": _asegurar_lista_strings(data.get("malas_practicas")),
+        "recomendaciones": _normalizar_recomendaciones_pro(data.get("recomendaciones")),
+        "evaluacion_tecnica": _normalizar_evaluacion_tecnica(data.get("evaluacion_tecnica"))
+    }
+
+
+def _respuesta_error_analisis(error: str) -> dict:
+    """Respuesta de fallback cuando hay un error interno."""
+    print("🔥 15 - dentro de _respuesta_error_analisis")
+    return {
+        "calificacion_general": {
+            "nivel": "Crítico",
+            "puntaje": 0,
+            "resumen": "No fue posible analizar el código. Verifica que sea código válido e intenta nuevamente."
+        },
+        "errores": [
+            {
+                "tipo": "Sistema",
+                "descripcion": f"Error interno del analizador: {error}",
+                "impacto": "alto",
+                "linea_aproximada": None
+            }
+        ],
+        "buenas_practicas": [],
+        "malas_practicas": [],
+        "recomendaciones": [
+            {
+                "mensaje": "El código no pudo ser procesado.",
+                "solucion": "Asegúrate de enviar código válido y legible.",
+                "prioridad": "alta"
+            }
+        ],
+        "evaluacion_tecnica": {
+            "manejo_estado": "No evaluado",
+            "legibilidad": "No evaluado",
+            "arquitectura": "No evaluado",
+            "performance": "No evaluado"
+        }
+    }
+
+
+# -----------------------------
+# 🧠 UTILIDADES DE NORMALIZACIÓN
+# -----------------------------
+
+NIVELES_VALIDOS = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"}
+IMPACTOS_VALIDOS = {"alto", "medio", "bajo"}
+PRIORIDADES_VALIDAS = {"alta", "media", "baja"}
+
+
+def _normalizar_nivel(nivel: str) -> str:
+    if nivel in NIVELES_VALIDOS:
+        return nivel
+    nivel_lower = nivel.lower()
+    mapa = {
+        "excellent": "Excelente", "good": "Bueno", "regular": "Regular",
+        "deficient": "Deficiente", "critical": "Crítico"
+    }
+    return mapa.get(nivel_lower, "Regular")
+
+
+def _normalizar_puntaje(puntaje) -> int:
+    try:
+        p = int(puntaje)
+        return max(0, min(100, p))
+    except (ValueError, TypeError):
+        return 50
+
+
+def _asegurar_lista_strings(valor) -> list:
+    if not isinstance(valor, list):
+        return []
+    result = []
+    for item in valor:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict):
+            # Extraer cualquier campo de texto si viene como objeto por error
+            for key in ("mensaje", "descripcion", "texto", "text"):
+                if key in item:
+                    result.append(str(item[key]))
+                    break
+    return result
+
+
+def _normalizar_errores_pro(lista) -> list:
+    """Normaliza la lista de errores al formato ErrorDetectado."""
+    if not isinstance(lista, list):
+        return []
+
+    resultado = []
+    for item in lista:
+        if isinstance(item, dict):
+            impacto = item.get("impacto", "medio")
+            if impacto not in IMPACTOS_VALIDOS:
+                impacto = "medio"
+            resultado.append({
+                "tipo": item.get("tipo", "General"),
+                "descripcion": item.get("descripcion", item.get("mensaje", "Error no especificado")),
+                "impacto": impacto,
+                "linea_aproximada": item.get("linea_aproximada", None)
+            })
+        elif isinstance(item, str):
+            resultado.append({
+                "tipo": "General",
+                "descripcion": item,
+                "impacto": "medio",
+                "linea_aproximada": None
+            })
+    return resultado
+
+
+def _normalizar_recomendaciones_pro(lista) -> list:
+    """Normaliza la lista de recomendaciones al formato RecomendacionItem pro."""
+    if not isinstance(lista, list):
+        return []
+
+    resultado = []
+    for item in lista:
+        if isinstance(item, dict):
+            prioridad = item.get("prioridad", "media")
+            if prioridad not in PRIORIDADES_VALIDAS:
+                prioridad = "media"
+            resultado.append({
+                "mensaje": item.get("mensaje", "Sin mensaje"),
+                "solucion": item.get("solucion", "Sin solución"),
+                "prioridad": prioridad
+            })
+        elif isinstance(item, str):
+            resultado.append({
+                "mensaje": item,
+                "solucion": "No especificada",
+                "prioridad": "media"
+            })
+    return resultado
+
+
+def _normalizar_evaluacion_tecnica(data) -> dict:
+    """Garantiza que evaluacion_tecnica tenga todos sus campos."""
+    base = {
+        "manejo_estado": "No evaluado",
+        "legibilidad": "No evaluado",
+        "arquitectura": "No evaluado",
+        "performance": "No evaluado"
+    }
+    if isinstance(data, dict):
+        for key in base:
+            if data.get(key):
+                base[key] = str(data[key])
+    return base
+
+
+def _safe_json_load(texto: str) -> dict:
+    try:
+        return json.loads(texto)
+    except Exception:
+        match = re.search(r"\{.*\}", texto, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                pass
+
+    print("⚠ JSON inválido del LLM, devolviendo vacío")
+    return {}
+
+
+
+
+
+app/services/rag_service.py:
+def procesar_texto_contexto(texto_raw: str) -> str:
+    """ 
+    Aquí iría la lógica RAG completa (chunking, vector db).
+    En esta fase inicial, preparamos y limpiamos el texto para inyección directa en el contexto.
+    """
+    if not texto_raw:
+        return ""
+    return texto_raw.strip()

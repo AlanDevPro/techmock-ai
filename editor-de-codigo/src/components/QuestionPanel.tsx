@@ -55,7 +55,7 @@ export default function QuestionPanel({
     setError(null);
     
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/generar-preguntas/${endpoint}`);
+      const response = await fetch(`http://127.0.0.1:8000/api/v1/generar-preguntas/${endpoint}`);
       if (!response.ok) throw new Error("No se pudo obtener las preguntas");
       const data = await response.json();
       

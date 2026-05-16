@@ -27,7 +27,20 @@ export default function IDEPage() {
   };
 
   const handleOpenIDE = (framework: 'vuejs' | 'nextjs') => {
-    window.open(`http://localhost:3001?framework=${framework}`, '_blank');
+    if (!user) return;
+    
+    const accessToken = localStorage.getItem('accessToken');
+    
+    const params = new URLSearchParams({
+      framework,
+      usuario_id: user.id,
+      token: accessToken || '',
+    });
+  
+    window.open(
+      `http://localhost:3001?${params.toString()}`,
+      '_blank'
+    );
   };
 
   const handleStart = (framework: 'vuejs' | 'nextjs') => {
@@ -49,7 +62,7 @@ export default function IDEPage() {
           
           <div className="flex items-center space-x-4">
             <div className="text-sm text-gray-400">
-              {user.displayName || user.email}
+              {user.email}
             </div>
             <button
               onClick={() => router.push('/dashboard')}

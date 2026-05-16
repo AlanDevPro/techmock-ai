@@ -22,6 +22,27 @@ class RespuestaEvaluacion(BaseModel):
         default=None,
         description="Error por falta de contexto"
     )
+    # 🟢 NUEVO: ID de la sesión creada automáticamente al generar la pregunta
+    sesion_id: Optional[str] = Field(
+        default=None,
+        description="UUID de la sesión de entrevista creada (si el usuario está autenticado)"
+    )
+
+
+# -----------------------------
+# 🔥 REQUEST PARA ANALIZAR CÓDIGO
+# -----------------------------
+class AnalizarCodigoRequest(BaseModel):
+    codigo: str = Field(description="Código a analizar")
+    framework: str = Field(default="general", description="Framework del código: Vue.js, Next.js, etc.")
+    sesion_id: Optional[str] = Field(
+        default=None,
+        description="UUID de la sesión activa para persistir el análisis"
+    )
+    usuario_id: Optional[str] = Field(
+        default=None,
+        description="UUID del usuario autenticado"
+    )
 
 
 # -----------------------------
