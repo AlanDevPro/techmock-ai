@@ -537,6 +537,54 @@ async def _persistir_analisis_codigo(
             modelo_ia_usado="qwen2.5-coder:1.5b",
         )
 
+        errores = resultado.get("errores", [])
+
+        for error in errores:
+            await repo.crear_error_detectado(
+                db=db,
+                sesion_id=sesion_id,
+                tipo=error.get("tipo"),
+                descripcion=error.get("descripcion"),
+                impacto=error.get("impacto"),
+                linea_aproximada=error.get("linea_aproximada"),
+            )
+
+            recomendaciones = resultado.get("recomendaciones", [])
+
+        for rec in recomendaciones:
+            await repo.crear_recomendacion_solucion(
+                db=db,
+                sesion_id=sesion_id,
+                mensaje=rec.get("mensaje"),
+                solucion=rec.get("solucion"),
+                prioridad=rec.get("prioridad"),
+            )
+
+            evaluacion_tecnica = resultado.get("evaluacion_tecnica", {})
+
+        await repo.crear_detalle_evaluacion(
+            db=db,
+            sesion_id=sesion_id,
+            manejo_estado=evaluacion_tecnica.get("manejo_estado"),
+            legibilidad=evaluacion_tecnica.get("legibilidad"),
+            arquitectura=evaluacion_tecnica.get("arquitectura"),
+            performance=evaluacion_tecnica.get("performance"),
+        )
+
+        if sesion.usuario_id:
+            await repo.actualizar_estadisticas_usuario(
+                db=db,
+                usuario_id=sesion.usuario_id,
+                puntaje=puntaje,
+        )
+        if sesion.usuario_id:
+            await repo.actualizar_perfil_tecnico(
+                db=db,
+                usuario_id=sesion.usuario_id,
+                evaluacion_tecnica=evaluacion_tecnica,
+        )
+
+
         await repo.finalizar_sesion(db=db, sesion_id=sesion_id)
 
         print(f"✅ Análisis de código persistido para sesión {sesion_id}")

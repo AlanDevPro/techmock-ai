@@ -1,7 +1,6 @@
 from app.schemas.evaluations import (
     RespuestaEvaluacion,
     RespuestaAnalisisCodigo,
-    AnalizarCodigoRequest,
     CalificacionGeneral,
     ErrorDetectado,
     RecomendacionItem,
@@ -11,7 +10,6 @@ from app.schemas.evaluations import (
 __all__ = [
     "RespuestaEvaluacion",
     "RespuestaAnalisisCodigo",
-    "AnalizarCodigoRequest",
     "CalificacionGeneral",
     "ErrorDetectado",
     "RecomendacionItem",

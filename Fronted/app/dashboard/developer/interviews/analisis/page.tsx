@@ -3,133 +3,77 @@
 import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
-// ─── Types aligned 1:1 with DB schema ─────────────────────────────────────────
+// ─── Types aligned with llm_service.py output ─────────────────────────────────
 
-/** evaluaciones table */
-interface Evaluacion {
-  id?: number;
-  sesion_id?: string;
-  puntaje_total: number;
-  puntaje_javascript?: number;
-  puntaje_arquitectura?: number;
-  puntaje_buenas_practicas?: number;
-  puntaje_comunicacion?: number;
-  puntaje_resolucion?: number;
-  nivel_candidato?: "descartado" | "revisar" | "promisorio" | "recomendado" | "destacado";
-  apto_para_contratacion?: boolean;
-  feedback_general: string;
-  resumen_para_reclutador?: string;
-  fortalezas?: string;
-  areas_mejora?: string;
-  sugerencias_recursos?: string;
-  generado_por_ia?: boolean;
-  modelo_ia_usado?: string;
-  tokens_evaluacion?: number;
-  fecha?: string;
+/** llm_service.py → calificacion_general */
+interface CalificacionGeneral {
+  nivel: "Excelente" | "Bueno" | "Regular" | "Deficiente" | "Crítico";
+  puntaje: number; // 0–100
+  resumen: string;
 }
 
-/** errores_detectados table */
-interface ErrorDetectado {
-  id?: number;
-  categoria_error?: string; // joined from categorias_error.nombre
-  categoria_tipo?: "conceptual" | "experiencia";
+/** llm_service.py → errores[] */
+interface ErrorLLM {
+  tipo: string; // "Sintaxis" | "Lógica" | "Performance" | "Seguridad" | "Arquitectura" | "Estilo" | "Sistema"
   descripcion: string;
-  severidad: "bajo" | "medio" | "alto" | "critico";
-  es_error_conceptual: boolean;
-  linea_codigo?: number;
-  fragmento_codigo?: string;
-  codigo_corregido?: string;
-  explicacion_ia?: string;
+  impacto: "alto" | "medio" | "bajo";
+  linea_aproximada?: string | number | null;
 }
 
-/** recomendaciones_solucion table */
-interface Recomendacion {
-  id?: number;
-
-  tipo?: "codigo" | "concepto" | "recurso" | "patron";
-
-  titulo?: string;
-
-  descripcion?: string;
-
-  codigo_ejemplo?: string;
-
-  recurso_url?: string;
-
-  recurso_titulo?: string;
-
-  categoria_error?: string;
-
-  prioridad?: "alta" | "media" | "baja";
-
-  orden?: number;
+/** llm_service.py → recomendaciones[] */
+interface RecomendacionLLM {
+  mensaje: string;
+  solucion: string;
+  prioridad: "alta" | "media" | "baja";
 }
 
-/** detalle_evaluacion table */
-interface DetalleRubrica {
-  rubrica_nombre: string;
-  rubrica_descripcion?: string;
-  peso_porcentual: number;
-  puntaje: number;
-  comentario?: string;
+/** llm_service.py → evaluacion_tecnica */
+interface EvaluacionTecnica {
+  manejo_estado: string;
+  legibilidad: string;
+  arquitectura: string;
+  performance: string;
 }
 
-/** Full analysis payload sent by the IDE */
+/** Full payload from llm_service.py → analizar_codigo_llm() */
 interface AnalisisPayload {
-  evaluacion: Evaluacion;
-  errores_detectados?: ErrorDetectado[];
-  recomendaciones?: Recomendacion[];
-  detalles_rubricas?: DetalleRubrica[];
-  // Legacy flat format still supported
-  calificacion_general?: { nivel: string; puntaje: number; resumen: string };
-  errores?: string[];
-  buenas_practicas?: string[];
-  malas_practicas?: string[];
-  recomendaciones_texto?: string[];
-  evaluacion_tecnica?: Record<string, string>;
+  calificacion_general: CalificacionGeneral;
+  errores: ErrorLLM[];
+  buenas_practicas: string[];
+  malas_practicas: string[];
+  recomendaciones: RecomendacionLLM[];
+  evaluacion_tecnica: EvaluacionTecnica;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const NIVEL_COLOR: Record<string, string> = {
-  descartado: "#ef4444",
-  revisar: "#f59e0b",
-  promisorio: "#3b82f6",
-  recomendado: "#22c55e",
-  destacado: "#a855f7",
   Excelente: "#22c55e",
   Bueno: "#3b82f6",
   Regular: "#f59e0b",
-  Deficiente: "#ef4444",
+  Deficiente: "#f97316",
+  Crítico: "#ef4444",
 };
 
-const NIVEL_LABEL: Record<string, string> = {
-  descartado: "Descartado",
-  revisar: "A Revisar",
-  promisorio: "Promisorio",
-  recomendado: "Recomendado",
-  destacado: "Destacado ★",
+const NIVEL_EMOJI: Record<string, string> = {
+  Excelente: "★",
+  Bueno: "✓",
+  Regular: "◎",
+  Deficiente: "⚠",
+  Crítico: "✗",
 };
 
-const SEV_COLOR: Record<string, string> = {
-  critico: "#ef4444",
-  alto: "#f97316",
+/** Mapea impacto (llm_service) → severidad visual */
+const IMPACTO_COLOR: Record<string, string> = {
+  alto: "#ef4444",
   medio: "#f59e0b",
   bajo: "#22c55e",
 };
 
-const SEV_LABEL: Record<string, string> = {
-  critico: "CRÍTICO",
+const IMPACTO_LABEL: Record<string, string> = {
   alto: "ALTO",
   medio: "MEDIO",
   bajo: "BAJO",
-};
-
-const TIPO_COLOR: Record<string, string> = {
-  codigo: "#3b82f6",
-  concepto: "#a855f7",
-  recurso: "#22c55e",
-  patron: "#f59e0b",
 };
 
 const PRIORIDAD_DOT: Record<string, string> = {
@@ -138,10 +82,27 @@ const PRIORIDAD_DOT: Record<string, string> = {
   baja: "#64748b",
 };
 
-const scoreColor = (s: number) => (s >= 85 ? "#22c55e" : s >= 65 ? "#f59e0b" : "#ef4444");
+/** Puntaje → color de barra */
+const scoreColor = (s: number) =>
+  s >= 85 ? "#22c55e" : s >= 65 ? "#f59e0b" : s >= 40 ? "#f97316" : "#ef4444";
 
-function pct(v?: number | null) {
-  return v != null ? Math.round(v) : null;
+/** Campos de evaluación_tecnica para mostrar como barras estimadas */
+const EVAL_TECNICA_SCORE: Record<string, Record<string, number>> = {
+  // Palabras clave → puntaje estimado visual (solo para UI)
+  excelente: { score: 90 },
+  bueno: { score: 75 },
+  regular: { score: 55 },
+  deficiente: { score: 35 },
+  "no evaluado": { score: 0 },
+};
+
+function estimarScore(texto: string): number {
+  const lower = texto.toLowerCase();
+  for (const key of Object.keys(EVAL_TECNICA_SCORE)) {
+    if (lower.includes(key)) return EVAL_TECNICA_SCORE[key].score;
+  }
+  // Si tiene contenido descriptivo positivo, asumimos Regular
+  return texto && texto !== "No evaluado" ? 60 : 0;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -165,198 +126,272 @@ function ScoreRing({ score, color }: { score: number; color: string }) {
         strokeDashoffset={circ / 4}
         style={{ transition: "stroke-dasharray 1.2s cubic-bezier(0.4,0,0.2,1)" }}
       />
-      <text x="70" y="66" textAnchor="middle" fill={color} fontSize="26" fontWeight="700" fontFamily="'JetBrains Mono',monospace">{Math.round(anim)}</text>
-      <text x="70" y="82" textAnchor="middle" fill="#475569" fontSize="11" fontFamily="'JetBrains Mono',monospace">/ 100</text>
+      <text x="70" y="66" textAnchor="middle" fill={color} fontSize="26" fontWeight="700" fontFamily="'JetBrains Mono',monospace">
+        {Math.round(anim)}
+      </text>
+      <text x="70" y="82" textAnchor="middle" fill="#475569" fontSize="11" fontFamily="'JetBrains Mono',monospace">
+        / 100
+      </text>
     </svg>
   );
 }
 
-function ScoreBar({ label, value, color }: { label: string; value?: number | null; color?: string }) {
-  const v = pct(value);
-  const c = color ?? (v != null ? scoreColor(v) : "#334155");
+function ScoreBar({
+  label,
+  value,
+  color,
+  sublabel,
+}: {
+  label: string;
+  value: number;
+  color?: string;
+  sublabel?: string;
+}) {
+  const c = color ?? scoreColor(value);
   const [w, setW] = useState(0);
   useEffect(() => {
-    if (v == null) return;
-    const t = setTimeout(() => setW(v), 300);
+    const t = setTimeout(() => setW(value), 300);
     return () => clearTimeout(t);
-  }, [v]);
+  }, [value]);
   return (
-    <div style={{ marginBottom: "14px" }}>
+    <div style={{ marginBottom: "18px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-        <span style={{ fontSize: "11px", color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>{label}</span>
+        <span style={{ fontSize: "11px", color: "#64748b", fontFamily: "'JetBrains Mono',monospace" }}>
+          {label}
+        </span>
         <span style={{ fontSize: "12px", color: c, fontWeight: 600, fontFamily: "'JetBrains Mono',monospace" }}>
-          {v != null ? `${v}` : "—"}
+          {value > 0 ? `${Math.round(value)}` : "—"}
         </span>
       </div>
       <div style={{ height: "5px", background: "#1e293b", borderRadius: "3px", overflow: "hidden" }}>
-        {v != null && (
-          <div style={{ height: "100%", width: `${w}%`, background: c, borderRadius: "3px", transition: "width 1s cubic-bezier(0.4,0,0.2,1)" }} />
-        )}
+        <div
+          style={{
+            height: "100%",
+            width: `${w}%`,
+            background: c,
+            borderRadius: "3px",
+            transition: "width 1s cubic-bezier(0.4,0,0.2,1)",
+          }}
+        />
       </div>
-    </div>
-  );
-}
-
-function RubricaBar({ rubrica }: { rubrica: DetalleRubrica }) {
-  const v = Math.round(rubrica.puntaje);
-  const c = scoreColor(v);
-  const [w, setW] = useState(0);
-  useEffect(() => {
-    const t = setTimeout(() => setW(v), 400);
-    return () => clearTimeout(t);
-  }, [v]);
-  return (
-    <div style={{ marginBottom: "18px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-        <span style={{ fontSize: "12px", color: "#cbd5e1", fontFamily: "'JetBrains Mono',monospace" }}>{rubrica.rubrica_nombre}</span>
-        <span style={{ fontSize: "12px", color: c, fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{v} / 100</span>
-      </div>
-      <div style={{ height: "4px", background: "#1e293b", borderRadius: "2px", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${w}%`, background: c, borderRadius: "2px", transition: "width 1.1s cubic-bezier(0.4,0,0.2,1)" }} />
-      </div>
-      {rubrica.comentario && (
-        <p style={{ margin: "6px 0 0", fontSize: "11.5px", color: "#475569", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.5 }}>
-          {rubrica.comentario}
+      {sublabel && (
+        <p style={{ margin: "5px 0 0", fontSize: "11px", color: "#334155", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.5 }}>
+          {sublabel}
         </p>
       )}
-      <span style={{ fontSize: "10px", color: "#334155", fontFamily: "'JetBrains Mono',monospace" }}>peso {rubrica.peso_porcentual}%</span>
     </div>
   );
 }
 
-function ErrorCard({ error }: { error: ErrorDetectado }) {
+function ErrorCard({ error }: { error: ErrorLLM }) {
   const [open, setOpen] = useState(false);
-  const sevColor = SEV_COLOR[error.severidad] ?? "#94a3b8";
+  const c = IMPACTO_COLOR[error.impacto] ?? "#94a3b8";
   return (
     <div
-      style={{ background: "#0a1628", border: `1px solid ${sevColor}28`, borderRadius: "10px", padding: "16px 20px", marginBottom: "10px", cursor: "pointer" }}
+      style={{
+        background: "#0a1628",
+        border: `1px solid ${c}28`,
+        borderRadius: "10px",
+        padding: "16px 20px",
+        marginBottom: "10px",
+        cursor: "pointer",
+      }}
       onClick={() => setOpen(!open)}
     >
       <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-        <span style={{ background: `${sevColor}20`, color: sevColor, fontSize: "9px", fontWeight: 700, padding: "3px 7px", borderRadius: "4px", letterSpacing: "0.08em", fontFamily: "'JetBrains Mono',monospace", flexShrink: 0, marginTop: "1px" }}>
-          {SEV_LABEL[error.severidad]}
+        {/* Impacto badge */}
+        <span
+          style={{
+            background: `${c}20`,
+            color: c,
+            fontSize: "9px",
+            fontWeight: 700,
+            padding: "3px 7px",
+            borderRadius: "4px",
+            letterSpacing: "0.08em",
+            fontFamily: "'JetBrains Mono',monospace",
+            flexShrink: 0,
+            marginTop: "1px",
+          }}
+        >
+          {IMPACTO_LABEL[error.impacto]}
         </span>
-        {error.es_error_conceptual && (
-          <span style={{ background: "#a855f720", color: "#a855f7", fontSize: "9px", fontWeight: 700, padding: "3px 7px", borderRadius: "4px", letterSpacing: "0.08em", fontFamily: "'JetBrains Mono',monospace", flexShrink: 0, marginTop: "1px" }}>
-            CONCEPTUAL
-          </span>
-        )}
-        <p style={{ margin: 0, fontSize: "13px", color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.5, flex: 1 }}>
+        {/* Tipo badge */}
+        <span
+          style={{
+            background: "#1e293b",
+            color: "#64748b",
+            fontSize: "9px",
+            fontWeight: 700,
+            padding: "3px 7px",
+            borderRadius: "4px",
+            letterSpacing: "0.06em",
+            fontFamily: "'JetBrains Mono',monospace",
+            flexShrink: 0,
+            marginTop: "1px",
+          }}
+        >
+          {error.tipo.toUpperCase()}
+        </span>
+        <p
+          style={{
+            margin: 0,
+            fontSize: "13px",
+            color: "#e2e8f0",
+            fontFamily: "'JetBrains Mono',monospace",
+            lineHeight: 1.5,
+            flex: 1,
+          }}
+        >
           {error.descripcion}
         </p>
         <span style={{ color: "#334155", fontSize: "12px", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
       </div>
 
-      {open && (
+      {open && error.linea_aproximada != null && (
         <div style={{ marginTop: "14px", borderTop: "1px solid #1e293b", paddingTop: "14px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", marginBottom: "12px" }}>
-            {error.categoria_error && (
-              <div>
-                <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "2px" }}>CATEGORÍA</span>
-                <span style={{ fontSize: "12px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>{error.categoria_error}</span>
-              </div>
-            )}
-            {error.linea_codigo != null && (
-              <div>
-                <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "2px" }}>LÍNEA</span>
-                <span style={{ fontSize: "12px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>:{error.linea_codigo}</span>
-              </div>
-            )}
-          </div>
-
-          {error.fragmento_codigo && (
-            <div style={{ marginBottom: "12px" }}>
-              <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "6px" }}>CÓDIGO PROBLEMÁTICO</span>
-              <pre style={{ margin: 0, padding: "10px 14px", background: "#020817", border: "1px solid #ef444430", borderRadius: "6px", fontSize: "12px", color: "#fca5a5", fontFamily: "'JetBrains Mono',monospace", overflowX: "auto", lineHeight: 1.6 }}>
-                {error.fragmento_codigo}
-              </pre>
-            </div>
-          )}
-          {error.codigo_corregido && (
-            <div style={{ marginBottom: "12px" }}>
-              <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "6px" }}>CORRECCIÓN SUGERIDA</span>
-              <pre style={{ margin: 0, padding: "10px 14px", background: "#020817", border: "1px solid #22c55e30", borderRadius: "6px", fontSize: "12px", color: "#86efac", fontFamily: "'JetBrains Mono',monospace", overflowX: "auto", lineHeight: 1.6 }}>
-                {error.codigo_corregido}
-              </pre>
-            </div>
-          )}
-          {error.explicacion_ia && (
-            <div>
-              <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "6px" }}>EXPLICACIÓN IA</span>
-              <p style={{ margin: 0, fontSize: "12.5px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.7 }}>{error.explicacion_ia}</p>
-            </div>
-          )}
+          <span style={{ fontSize: "10px", color: "#475569", fontFamily: "'JetBrains Mono',monospace" }}>
+            LÍNEA APROXIMADA →{" "}
+          </span>
+          <span style={{ fontSize: "12px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace" }}>
+            {error.linea_aproximada}
+          </span>
         </div>
       )}
     </div>
   );
 }
 
-function RecomendacionCard({ rec }: { rec: Recomendacion }) {
+function RecomendacionCard({ rec, index }: { rec: RecomendacionLLM; index: number }) {
   const [open, setOpen] = useState(false);
-  const tc = TIPO_COLOR[rec.tipo ?? "general"] ?? "#64748b";
-  const pc = PRIORIDAD_DOT[rec.prioridad ?? "media"] ?? "#64748b";
+  const pc = PRIORIDAD_DOT[rec.prioridad] ?? "#64748b";
   return (
     <div
-      style={{ background: "#0a1628", border: `1px solid ${tc}28`, borderRadius: "10px", padding: "16px 20px", marginBottom: "10px", cursor: "pointer" }}
+      style={{
+        background: "#0a1628",
+        border: "1px solid #1e293b",
+        borderRadius: "10px",
+        padding: "16px 20px",
+        marginBottom: "10px",
+        cursor: "pointer",
+      }}
       onClick={() => setOpen(!open)}
     >
       <div style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-        <span style={{ background: `${tc}20`, color: tc, fontSize: "9px", fontWeight: 700, padding: "3px 7px", borderRadius: "4px", letterSpacing: "0.08em", fontFamily: "'JetBrains Mono',monospace", flexShrink: 0, marginTop: "1px" }}>
-          {(rec.tipo ?? "general").toUpperCase()}
+        <span
+          style={{
+            color: "#1e293b",
+            fontSize: "10px",
+            fontFamily: "'JetBrains Mono',monospace",
+            flexShrink: 0,
+            marginTop: "2px",
+            minWidth: "20px",
+          }}
+        >
+          {String(index + 1).padStart(2, "0")}
         </span>
-        <div style={{ flex: 1 }}>
-          <p style={{ margin: 0, fontSize: "13px", color: "#e2e8f0", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.5 }}>
-            {rec.titulo}
-          </p>
-          {rec.categoria_error && (
-            <span style={{ fontSize: "10.5px", color: "#475569", fontFamily: "'JetBrains Mono',monospace" }}>{rec.categoria_error}</span>
-          )}
-        </div>
+        <p
+          style={{
+            margin: 0,
+            fontSize: "13px",
+            color: "#e2e8f0",
+            fontFamily: "'JetBrains Mono',monospace",
+            lineHeight: 1.5,
+            flex: 1,
+          }}
+        >
+          {rec.mensaje}
+        </p>
         <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: pc, display: "inline-block" }} />
-          <span style={{ fontSize: "10px", color: "#475569", fontFamily: "'JetBrains Mono',monospace" }}>{rec.prioridad}</span>
+          <span
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: pc,
+              display: "inline-block",
+            }}
+          />
+          <span style={{ fontSize: "10px", color: "#475569", fontFamily: "'JetBrains Mono',monospace" }}>
+            {rec.prioridad}
+          </span>
           <span style={{ color: "#334155", fontSize: "12px", marginLeft: "6px" }}>{open ? "▲" : "▼"}</span>
         </div>
       </div>
+
       {open && (
         <div style={{ marginTop: "14px", borderTop: "1px solid #1e293b", paddingTop: "14px" }}>
-          <p style={{ margin: "0 0 12px", fontSize: "12.5px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.7 }}>{rec.descripcion}</p>
-          {rec.codigo_ejemplo && (
-            <div style={{ marginBottom: "12px" }}>
-              <span style={{ fontSize: "10px", color: "#475569", display: "block", fontFamily: "'JetBrains Mono',monospace", marginBottom: "6px" }}>EJEMPLO</span>
-              <pre style={{ margin: 0, padding: "10px 14px", background: "#020817", border: `1px solid ${tc}30`, borderRadius: "6px", fontSize: "12px", color: "#bae6fd", fontFamily: "'JetBrains Mono',monospace", overflowX: "auto", lineHeight: 1.6 }}>
-                {rec.codigo_ejemplo}
-              </pre>
-            </div>
-          )}
-          {rec.recurso_url && (
-            <a
-              href={rec.recurso_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#3b82f6", fontFamily: "'JetBrains Mono',monospace", textDecoration: "none" }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              ↗ {rec.recurso_titulo ?? rec.recurso_url}
-            </a>
-          )}
+          <span
+            style={{
+              fontSize: "10px",
+              color: "#475569",
+              display: "block",
+              fontFamily: "'JetBrains Mono',monospace",
+              marginBottom: "6px",
+            }}
+          >
+            SOLUCIÓN SUGERIDA
+          </span>
+          <p
+            style={{
+              margin: 0,
+              fontSize: "12.5px",
+              color: "#94a3b8",
+              fontFamily: "'JetBrains Mono',monospace",
+              lineHeight: 1.7,
+            }}
+          >
+            {rec.solucion}
+          </p>
         </div>
       )}
     </div>
   );
 }
 
-function Section({ title, accent, icon, children, count }: { title: string; accent: string; icon: string; children: React.ReactNode; count?: number }) {
+function Section({
+  title,
+  accent,
+  icon,
+  children,
+  count,
+}: {
+  title: string;
+  accent: string;
+  icon: string;
+  children: React.ReactNode;
+  count?: number;
+}) {
   return (
     <div style={{ marginBottom: "28px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
         <span style={{ fontSize: "16px" }}>{icon}</span>
-        <h2 style={{ margin: 0, fontSize: "11px", color: accent, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "'JetBrains Mono',monospace" }}>
+        <h2
+          style={{
+            margin: 0,
+            fontSize: "11px",
+            color: accent,
+            fontWeight: 700,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            fontFamily: "'JetBrains Mono',monospace",
+          }}
+        >
           {title}
         </h2>
         {count != null && (
-          <span style={{ marginLeft: "auto", background: `${accent}20`, color: accent, fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", fontFamily: "'JetBrains Mono',monospace" }}>
+          <span
+            style={{
+              marginLeft: "auto",
+              background: `${accent}20`,
+              color: accent,
+              fontSize: "11px",
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: "4px",
+              fontFamily: "'JetBrains Mono',monospace",
+            }}
+          >
             {count}
           </span>
         )}
@@ -366,23 +401,33 @@ function Section({ title, accent, icon, children, count }: { title: string; acce
   );
 }
 
-function TextBlock({ text, accent }: { text: string; accent: string }) {
-  const lines = text.split(/[\n•\-]/).map(l => l.trim()).filter(Boolean);
-  if (lines.length === 1) {
-    return <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8", fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.7 }}>{text}</p>;
-  }
+function ListaTexto({ items, accent }: { items: string[]; accent: string }) {
+  if (!items.length) return null;
   return (
     <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-      {lines.map((l, i) => (
-        <li key={i} style={{ display: "flex", gap: "10px", padding: "9px 0", borderBottom: i < lines.length - 1 ? "1px solid #0f172a" : "none", color: "#cbd5e1", fontSize: "13px", lineHeight: 1.6, fontFamily: "'JetBrains Mono',monospace" }}>
-          <span style={{ color: accent, flexShrink: 0 }}>›</span>{l}
+      {items.map((item, i) => (
+        <li
+          key={i}
+          style={{
+            display: "flex",
+            gap: "10px",
+            padding: "9px 0",
+            borderBottom: i < items.length - 1 ? "1px solid #0f172a" : "none",
+            color: "#cbd5e1",
+            fontSize: "13px",
+            lineHeight: 1.6,
+            fontFamily: "'JetBrains Mono',monospace",
+          }}
+        >
+          <span style={{ color: accent, flexShrink: 0 }}>›</span>
+          {item}
         </li>
       ))}
     </ul>
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AnalisisPage() {
   const searchParams = useSearchParams();
@@ -393,7 +438,9 @@ export default function AnalisisPage() {
   const [mounted, setMounted] = useState(false);
   const listenerAttached = useRef(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -411,6 +458,7 @@ export default function AnalisisPage() {
       listenerAttached.current = true;
     }
 
+    // SessionStorage
     try {
       const stored = sessionStorage.getItem("analisis_resultado");
       if (stored) {
@@ -419,8 +467,11 @@ export default function AnalisisPage() {
         sessionStorage.removeItem("analisis_resultado");
         return;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
+    // Query param
     const q = searchParams.get("analysis");
     if (q) {
       try {
@@ -451,10 +502,33 @@ export default function AnalisisPage() {
   // ── Loading ──
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", background: "#020817", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono',monospace", color: "#64748b", gap: "20px" }}>
-        <div style={{ width: "44px", height: "44px", border: "3px solid #1e293b", borderTop: "3px solid #22c55e", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#020817",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'JetBrains Mono',monospace",
+          color: "#64748b",
+          gap: "20px",
+        }}
+      >
+        <div
+          style={{
+            width: "44px",
+            height: "44px",
+            border: "3px solid #1e293b",
+            borderTop: "3px solid #22c55e",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <p style={{ margin: 0, fontSize: "12px", letterSpacing: "0.1em" }}>Recibiendo análisis del IDE...</p>
+        <p style={{ margin: 0, fontSize: "12px", letterSpacing: "0.1em" }}>
+          Recibiendo análisis del IDE...
+        </p>
       </div>
     );
   }
@@ -462,53 +536,79 @@ export default function AnalisisPage() {
   // ── Error ──
   if (error || !payload) {
     return (
-      <div style={{ minHeight: "100vh", background: "#020817", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono',monospace", color: "#ef4444", gap: "16px", padding: "40px", textAlign: "center" }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#020817",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'JetBrains Mono',monospace",
+          color: "#ef4444",
+          gap: "16px",
+          padding: "40px",
+          textAlign: "center",
+        }}
+      >
         <span style={{ fontSize: "40px" }}>✗</span>
-        <p style={{ margin: 0, fontSize: "13px", color: "#94a3b8", maxWidth: "480px", lineHeight: 1.7 }}>
+        <p
+          style={{
+            margin: 0,
+            fontSize: "13px",
+            color: "#94a3b8",
+            maxWidth: "480px",
+            lineHeight: 1.7,
+          }}
+        >
           {error ?? "No se encontraron datos de análisis."}
         </p>
-        <button onClick={() => router.push("/dashboard/developer/interviews")} style={{ marginTop: "12px", padding: "10px 24px", background: "#1e293b", color: "#e2e8f0", border: "1px solid #334155", borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontFamily: "'JetBrains Mono',monospace" }}>
+        <button
+          onClick={() => router.push("/dashboard/developer/interviews")}
+          style={{
+            marginTop: "12px",
+            padding: "10px 24px",
+            background: "#1e293b",
+            color: "#e2e8f0",
+            border: "1px solid #334155",
+            borderRadius: "8px",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontFamily: "'JetBrains Mono',monospace",
+          }}
+        >
           ← Volver a entrevistas
         </button>
       </div>
     );
   }
 
-  // ── Normalize: support both new (DB-structured) and legacy flat format ──
-  const ev = payload.evaluacion ?? ({
-    puntaje_total: payload.calificacion_general?.puntaje ?? 0,
-    feedback_general: payload.calificacion_general?.resumen ?? "",
-    nivel_candidato: undefined,
-    fortalezas: (payload.buenas_practicas ?? []).join("\n"),
-    areas_mejora: (payload.malas_practicas ?? []).join("\n"),
-  } as Evaluacion);
+  // ── Datos del LLM ──
+  const cal = payload.calificacion_general;
+  const puntaje = Math.max(0, Math.min(100, Math.round(cal.puntaje)));
+  const nivelColor = NIVEL_COLOR[cal.nivel] ?? scoreColor(puntaje);
 
-  const errores: ErrorDetectado[] = payload.errores_detectados?.length
-    ? payload.errores_detectados
-    : (payload.errores ?? []).map(d => ({ descripcion: d, severidad: "medio" as const, es_error_conceptual: false }));
+  const errores = payload.errores ?? [];
+  const recs = payload.recomendaciones ?? [];
+  const buenas = payload.buenas_practicas ?? [];
+  const malas = payload.malas_practicas ?? [];
+  const evalTec = payload.evaluacion_tecnica;
 
-  const recs: Recomendacion[] = payload.recomendaciones?.length
-    ? payload.recomendaciones
-    : (payload.recomendaciones_texto ?? []).map((d, i) => ({ tipo: "concepto" as const, titulo: `Recomendación ${i + 1}`, descripcion: d, prioridad: "media" as const }));
-
-  const rubricas: DetalleRubrica[] = payload.detalles_rubricas ?? [];
-
-  const puntaje = pct(ev.puntaje_total) ?? 0;
-  const nivelKey = ev.nivel_candidato ?? payload.calificacion_general?.nivel ?? "promisorio";
-  const color = NIVEL_COLOR[nivelKey] ?? scoreColor(puntaje);
-
-  const scoreBreakdown = [
-    { label: "JavaScript", value: ev.puntaje_javascript },
-    { label: "Arquitectura", value: ev.puntaje_arquitectura },
-    { label: "Buenas Prácticas", value: ev.puntaje_buenas_practicas },
-    { label: "Comunicación", value: ev.puntaje_comunicacion },
-    { label: "Resolución", value: ev.puntaje_resolucion },
-  ].filter(s => s.value != null);
-
-  const sevCount = errores.reduce<Record<string, number>>((acc, e) => {
-    acc[e.severidad] = (acc[e.severidad] ?? 0) + 1;
+  // Conteo por impacto
+  const impactoCount = errores.reduce<Record<string, number>>((acc, e) => {
+    acc[e.impacto] = (acc[e.impacto] ?? 0) + 1;
     return acc;
   }, {});
+
+  // Campos evaluacion_tecnica para barras
+  const evalTecEntries: { label: string; texto: string; score: number }[] = evalTec
+    ? [
+        { label: "Manejo de Estado", texto: evalTec.manejo_estado, score: estimarScore(evalTec.manejo_estado) },
+        { label: "Legibilidad", texto: evalTec.legibilidad, score: estimarScore(evalTec.legibilidad) },
+        { label: "Arquitectura", texto: evalTec.arquitectura, score: estimarScore(evalTec.arquitectura) },
+        { label: "Performance", texto: evalTec.performance, score: estimarScore(evalTec.performance) },
+      ].filter((e) => e.texto && e.texto !== "No evaluado")
+    : [];
 
   return (
     <>
@@ -525,6 +625,7 @@ export default function AnalisisPage() {
         .fi:nth-child(6){animation-delay:.37s}
         .fi:nth-child(7){animation-delay:.44s}
         .fi:nth-child(8){animation-delay:.51s}
+        .fi:nth-child(9){animation-delay:.58s}
         @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
         .grid-bg {
           background-image: linear-gradient(rgba(34,197,94,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(34,197,94,0.025) 1px,transparent 1px);
@@ -535,178 +636,378 @@ export default function AnalisisPage() {
         ::-webkit-scrollbar-thumb{background:#1e293b;border-radius:3px}
       `}</style>
 
-      <div className="grid-bg" style={{ minHeight: "100vh", background: "#020817", padding: "32px 24px 80px", fontFamily: "'JetBrains Mono',monospace" }}>
+      <div
+        className="grid-bg"
+        style={{
+          minHeight: "100vh",
+          background: "#020817",
+          padding: "32px 24px 80px",
+          fontFamily: "'JetBrains Mono',monospace",
+        }}
+      >
         <div style={{ maxWidth: "920px", margin: "0 auto" }}>
 
           {/* ── Header ── */}
           <div className="fi" style={{ marginBottom: "36px" }}>
-            <button onClick={() => router.push("/dashboard/developer/interviews")} style={{ background: "none", border: "none", color: "#334155", cursor: "pointer", fontSize: "12px", fontFamily: "'JetBrains Mono',monospace", display: "flex", alignItems: "center", gap: "6px", marginBottom: "18px", padding: 0, letterSpacing: "0.05em" }}>
+            <button
+              onClick={() => router.push("/dashboard/developer/interviews")}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#334155",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontFamily: "'JetBrains Mono',monospace",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                marginBottom: "18px",
+                padding: 0,
+                letterSpacing: "0.05em",
+              }}
+            >
               ← Volver a entrevistas
             </button>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "8px" }}>
-              <span style={{ fontSize: "10px", color: "#1e293b", letterSpacing: "0.15em", textTransform: "uppercase" }}>Code Review</span>
-              <span style={{ width: "1px", height: "10px", background: "#1e293b", display: "inline-block" }} />
-              <span style={{ fontSize: "10px", color: "#1e293b", letterSpacing: "0.15em" }}>
-                {ev.fecha ? new Date(ev.fecha).toLocaleDateString("es-BO", { day: "2-digit", month: "short", year: "numeric" }) : new Date().toLocaleDateString("es-BO", { day: "2-digit", month: "short", year: "numeric" })}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: "10px",
+                marginBottom: "8px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "#1e293b",
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Code Review
               </span>
-              {ev.modelo_ia_usado && (
-                <>
-                  <span style={{ width: "1px", height: "10px", background: "#1e293b", display: "inline-block" }} />
-                  <span style={{ fontSize: "10px", color: "#1e293b", letterSpacing: "0.12em" }}>{ev.modelo_ia_usado}</span>
-                </>
-              )}
+              <span
+                style={{
+                  width: "1px",
+                  height: "10px",
+                  background: "#1e293b",
+                  display: "inline-block",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "#1e293b",
+                  letterSpacing: "0.15em",
+                }}
+              >
+                {new Date().toLocaleDateString("es-BO", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+              <span
+                style={{
+                  width: "1px",
+                  height: "10px",
+                  background: "#1e293b",
+                  display: "inline-block",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "#1e293b",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                qwen2.5-coder:1.5b
+              </span>
             </div>
-            <h1 style={{ fontSize: "26px", fontWeight: 700, color: "#f1f5f9", fontFamily: "'Sora',sans-serif", letterSpacing: "-0.02em", lineHeight: 1.2 }}>
+            <h1
+              style={{
+                fontSize: "26px",
+                fontWeight: 700,
+                color: "#f1f5f9",
+                fontFamily: "'Sora',sans-serif",
+                letterSpacing: "-0.02em",
+                lineHeight: 1.2,
+              }}
+            >
               Análisis de Código
             </h1>
           </div>
 
           {/* ── Hero: Score + Nivel ── */}
-          <div className="fi" style={{ background: "#0a1628", border: `1px solid ${color}28`, borderRadius: "16px", padding: "28px 32px", marginBottom: "20px", display: "flex", gap: "36px", alignItems: "center", flexWrap: "wrap" }}>
+          <div
+            className="fi"
+            style={{
+              background: "#0a1628",
+              border: `1px solid ${nivelColor}28`,
+              borderRadius: "16px",
+              padding: "28px 32px",
+              marginBottom: "20px",
+              display: "flex",
+              gap: "36px",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <div style={{ flexShrink: 0 }}>
-              <ScoreRing score={puntaje} color={color} />
+              <ScoreRing score={puntaje} color={nivelColor} />
             </div>
+
             <div style={{ flex: 1, minWidth: "200px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "20px", fontWeight: 700, color, fontFamily: "'Sora',sans-serif" }}>
-                  {NIVEL_LABEL[nivelKey] ?? nivelKey}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  marginBottom: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "20px",
+                    fontWeight: 700,
+                    color: nivelColor,
+                    fontFamily: "'Sora',sans-serif",
+                  }}
+                >
+                  {NIVEL_EMOJI[cal.nivel]} {cal.nivel}
                 </span>
-                {ev.apto_para_contratacion != null && (
-                  <span style={{
-                    fontSize: "10px", fontWeight: 700, padding: "3px 8px", borderRadius: "4px", letterSpacing: "0.08em",
-                    background: ev.apto_para_contratacion ? "#22c55e20" : "#ef444420",
-                    color: ev.apto_para_contratacion ? "#22c55e" : "#ef4444",
-                    fontFamily: "'JetBrains Mono',monospace",
-                  }}>
-                    {ev.apto_para_contratacion ? "APTO PARA CONTRATACIÓN" : "NO APTO"}
-                  </span>
-                )}
               </div>
-              <p style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.7, margin: 0 }}>{ev.feedback_general}</p>
+              <p
+                style={{
+                  color: "#64748b",
+                  fontSize: "13px",
+                  lineHeight: 1.7,
+                  margin: 0,
+                }}
+              >
+                {cal.resumen}
+              </p>
             </div>
-            <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: "10px", minWidth: "140px" }}>
+
+            {/* Stats rápidos */}
+            <div
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                minWidth: "140px",
+              }}
+            >
               {[
                 { label: "Errores", count: errores.length, c: "#ef4444" },
-                { label: "Críticos", count: sevCount["critico"] ?? 0, c: "#ef4444" },
+                { label: "Impacto Alto", count: impactoCount["alto"] ?? 0, c: "#ef4444" },
+                { label: "Buenas práct.", count: buenas.length, c: "#22c55e" },
                 { label: "Recomendac.", count: recs.length, c: "#3b82f6" },
-                { label: "Rúbricas", count: rubricas.length, c: "#f59e0b" },
               ].map(({ label, count, c }) => (
-                <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+                <div
+                  key={label}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "16px",
+                  }}
+                >
                   <span style={{ fontSize: "10.5px", color: "#334155" }}>{label}</span>
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: count > 0 ? c : "#1e293b", background: count > 0 ? `${c}18` : "transparent", padding: "1px 8px", borderRadius: "4px", minWidth: "28px", textAlign: "center" }}>
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      color: count > 0 ? c : "#1e293b",
+                      background: count > 0 ? `${c}18` : "transparent",
+                      padding: "1px 8px",
+                      borderRadius: "4px",
+                      minWidth: "28px",
+                      textAlign: "center",
+                    }}
+                  >
                     {count}
                   </span>
                 </div>
               ))}
-              {ev.tokens_evaluacion != null && (
-                <div style={{ borderTop: "1px solid #0f172a", paddingTop: "8px" }}>
-                  <span style={{ fontSize: "10px", color: "#1e293b" }}>tokens: {ev.tokens_evaluacion.toLocaleString()}</span>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* ── Score Breakdown ── */}
-          {scoreBreakdown.length > 0 && (
-            <div className="fi" style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", padding: "22px 24px", marginBottom: "20px" }}>
-              <h2 style={{ margin: "0 0 18px", fontSize: "10px", color: "#334155", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                Desglose técnico
+          {/* ── Evaluación Técnica (barras + texto) ── */}
+          {evalTecEntries.length > 0 && (
+            <div
+              className="fi"
+              style={{
+                background: "#0f172a",
+                border: "1px solid #1e293b",
+                borderRadius: "12px",
+                padding: "22px 24px",
+                marginBottom: "20px",
+              }}
+            >
+              <h2
+                style={{
+                  margin: "0 0 18px",
+                  fontSize: "10px",
+                  color: "#334155",
+                  fontWeight: 700,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Evaluación técnica
               </h2>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0 36px" }}>
-                {scoreBreakdown.map(s => (
-                  <ScoreBar key={s.label} label={s.label} value={s.value} />
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "0 36px",
+                }}
+              >
+                {evalTecEntries.map((e) => (
+                  <ScoreBar
+                    key={e.label}
+                    label={e.label}
+                    value={e.score}
+                    sublabel={e.texto}
+                  />
                 ))}
               </div>
             </div>
           )}
 
-          {/* ── Resumen reclutador ── */}
-          {ev.resumen_para_reclutador && (
-            <div className="fi" style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", padding: "22px 24px", marginBottom: "20px" }}>
-              <h2 style={{ margin: "0 0 12px", fontSize: "10px", color: "#334155", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                Resumen para reclutador
-              </h2>
-              <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8", lineHeight: 1.7 }}>{ev.resumen_para_reclutador}</p>
-            </div>
-          )}
-
-          {/* ── Fortalezas & Áreas de Mejora ── */}
-          {(ev.fortalezas || ev.areas_mejora) && (
-            <div className="fi" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px", marginBottom: "20px" }}>
-              {ev.fortalezas && (
-                <div style={{ background: "#0f172a", border: "1px solid #22c55e20", borderRadius: "12px", padding: "20px 22px" }}>
-                  <Section title="Fortalezas" accent="#22c55e" icon="✓">
-                    <TextBlock text={ev.fortalezas} accent="#22c55e" />
+          {/* ── Buenas & Malas prácticas ── */}
+          {(buenas.length > 0 || malas.length > 0) && (
+            <div
+              className="fi"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "16px",
+                marginBottom: "20px",
+              }}
+            >
+              {buenas.length > 0 && (
+                <div
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid #22c55e20",
+                    borderRadius: "12px",
+                    padding: "20px 22px",
+                  }}
+                >
+                  <Section title="Buenas Prácticas" accent="#22c55e" icon="✓" count={buenas.length}>
+                    <ListaTexto items={buenas} accent="#22c55e" />
                   </Section>
                 </div>
               )}
-              {ev.areas_mejora && (
-                <div style={{ background: "#0f172a", border: "1px solid #f59e0b20", borderRadius: "12px", padding: "20px 22px" }}>
-                  <Section title="Áreas de Mejora" accent="#f59e0b" icon="⚠">
-                    <TextBlock text={ev.areas_mejora} accent="#f59e0b" />
+              {malas.length > 0 && (
+                <div
+                  style={{
+                    background: "#0f172a",
+                    border: "1px solid #f59e0b20",
+                    borderRadius: "12px",
+                    padding: "20px 22px",
+                  }}
+                >
+                  <Section title="Malas Prácticas" accent="#f59e0b" icon="⚠" count={malas.length}>
+                    <ListaTexto items={malas} accent="#f59e0b" />
                   </Section>
                 </div>
               )}
             </div>
           )}
 
-          {/* ── Sugerencias de recursos ── */}
-          {ev.sugerencias_recursos && (
-            <div className="fi" style={{ background: "#0f172a", border: "1px solid #3b82f620", borderRadius: "12px", padding: "20px 22px", marginBottom: "20px" }}>
-              <Section title="Recursos Sugeridos" accent="#3b82f6" icon="→">
-                <TextBlock text={ev.sugerencias_recursos} accent="#3b82f6" />
-              </Section>
-            </div>
-          )}
-
-          {/* ── Errores Detectados ── */}
+          {/* ── Errores detectados ── */}
           {errores.length > 0 && (
             <div className="fi" style={{ marginBottom: "20px" }}>
-              <Section title="Errores Detectados" accent="#ef4444" icon="✗" count={errores.length}>
-                {/* Severity summary pills */}
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "14px" }}>
-                  {(["critico", "alto", "medio", "bajo"] as const).map(s =>
-                    sevCount[s] ? (
-                      <span key={s} style={{ fontSize: "10px", fontWeight: 700, padding: "3px 10px", borderRadius: "4px", background: `${SEV_COLOR[s]}18`, color: SEV_COLOR[s], fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.06em" }}>
-                        {sevCount[s]} {SEV_LABEL[s]}
+              <Section
+                title="Errores Detectados"
+                accent="#ef4444"
+                icon="✗"
+                count={errores.length}
+              >
+                {/* Impacto pills */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                    marginBottom: "14px",
+                  }}
+                >
+                  {(["alto", "medio", "bajo"] as const).map((imp) =>
+                    impactoCount[imp] ? (
+                      <span
+                        key={imp}
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          padding: "3px 10px",
+                          borderRadius: "4px",
+                          background: `${IMPACTO_COLOR[imp]}18`,
+                          color: IMPACTO_COLOR[imp],
+                          fontFamily: "'JetBrains Mono',monospace",
+                          letterSpacing: "0.06em",
+                        }}
+                      >
+                        {impactoCount[imp]} {IMPACTO_LABEL[imp]}
                       </span>
                     ) : null
                   )}
                 </div>
-                {errores.sort((a, b) => {
-                  const order = { critico: 0, alto: 1, medio: 2, bajo: 3 };
-                  return (order[a.severidad] ?? 4) - (order[b.severidad] ?? 4);
-                }).map((e, i) => <ErrorCard key={i} error={e} />)}
+
+                {/* Ordenar: alto → medio → bajo */}
+                {[...errores]
+                  .sort((a, b) => {
+                    const order = { alto: 0, medio: 1, bajo: 2 };
+                    return (order[a.impacto] ?? 3) - (order[b.impacto] ?? 3);
+                  })
+                  .map((e, i) => (
+                    <ErrorCard key={i} error={e} />
+                  ))}
               </Section>
             </div>
           )}
 
-          {/* ── Recomendaciones de Solución ── */}
+          {/* ── Recomendaciones ── */}
           {recs.length > 0 && (
             <div className="fi" style={{ marginBottom: "20px" }}>
-              <Section title="Recomendaciones de Solución" accent="#3b82f6" icon="◈" count={recs.length}>
-                {recs.sort((a, b) => {
-                  const p = { alta: 0, media: 1, baja: 2 };
-                  return (p[a.prioridad ?? "media"] ?? 3) - (p[b.prioridad ?? "media"] ?? 3);
-                }).map((r, i) => <RecomendacionCard key={i} rec={r} />)}
-              </Section>
-            </div>
-          )}
-
-          {/* ── Detalle por Rúbrica ── */}
-          {rubricas.length > 0 && (
-            <div className="fi" style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", padding: "22px 24px", marginBottom: "20px" }}>
-              <Section title="Evaluación por Rúbrica" accent="#a855f7" icon="◆" count={rubricas.length}>
-                {rubricas.map((r, i) => <RubricaBar key={i} rubrica={r} />)}
+              <Section
+                title="Recomendaciones"
+                accent="#3b82f6"
+                icon="◈"
+                count={recs.length}
+              >
+                {/* Ordenar: alta → media → baja */}
+                {[...recs]
+                  .sort((a, b) => {
+                    const p = { alta: 0, media: 1, baja: 2 };
+                    return (p[a.prioridad] ?? 3) - (p[b.prioridad] ?? 3);
+                  })
+                  .map((r, i) => (
+                    <RecomendacionCard key={i} rec={r} index={i} />
+                  ))}
               </Section>
             </div>
           )}
 
           {/* ── Footer ── */}
-          <div className="fi" style={{ marginTop: "48px", textAlign: "center", color: "#1e293b", fontSize: "10px", letterSpacing: "0.12em" }}>
+          <div
+            className="fi"
+            style={{
+              marginTop: "48px",
+              textAlign: "center",
+              color: "#1e293b",
+              fontSize: "10px",
+              letterSpacing: "0.12em",
+            }}
+          >
             ANÁLISIS GENERADO AUTOMÁTICAMENTE · AI CODE REVIEW · TECHMOCK
           </div>
-
         </div>
       </div>
     </>

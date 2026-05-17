@@ -85,7 +85,12 @@ Formato obligatorio:
 # -----------------------------
 # 🔥 ANALIZAR CÓDIGO (PRO FEEDBACK)
 # -----------------------------
-async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
+async def analizar_codigo_llm(
+    codigo: str,
+    framework: str,
+    contexto_proyecto: str = "",
+) -> dict:
+
     print("🔥 10 - dentro de analizar_codigo_llm")
     print("⚡ Iniciando análisis profesional de código...")
 
@@ -94,8 +99,9 @@ async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
         format="json",
         temperature=0.1,
         num_predict=800,
-        num_ctx=2048
+        num_ctx=4096
     )
+
     print("🔥 11 - ChatOllama creado en analizar_codigo_llm")
 
     esquema = """
@@ -133,35 +139,41 @@ async def analizar_codigo_llm(codigo: str, framework: str) -> dict:
 
     prompt = f"""
 Eres un ingeniero senior con 10+ años de experiencia en revisión de código frontend.
+
 Tu objetivo es dar un feedback profesional, constructivo y accionable.
 
-Analiza el código {framework} enviado por el usuario y responde ÚNICAMENTE en JSON válido.
+Analiza el código {framework} enviado por el usuario considerando también
+el contexto completo del proyecto, arquitectura, imports, composición de componentes
+y relación entre archivos.
+
+Responde ÚNICAMENTE en JSON válido.
 
 ⚠ REGLAS CRÍTICAS:
 
-1. calificacion_general.nivel DEBE ser uno de: "Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
-2. calificacion_general.puntaje DEBE ser un número entero del 0 al 100
-3. calificacion_general.resumen → párrafo con tono profesional y constructivo
-4. errores → lista de objetos con: tipo, descripcion, impacto, linea_aproximada
-5. buenas_practicas → SOLO strings (prácticas positivas encontradas)
-6. malas_practicas → SOLO strings (antipatrones o malos hábitos detectados)
-7. recomendaciones → lista de objetos con: mensaje, solucion, prioridad
-8. evaluacion_tecnica → objeto con: manejo_estado, legibilidad, arquitectura, performance
+1. calificacion_general.nivel DEBE ser uno de:
+   "Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
 
-ESCALA DE PUNTAJE:
+2. calificacion_general.puntaje DEBE ser un entero de 0 a 100
+
+3. errores → lista de objetos:
+   tipo, descripcion, impacto, linea_aproximada
+
+4. buenas_practicas → SOLO strings
+
+5. malas_practicas → SOLO strings
+
+6. recomendaciones → lista de objetos:
+   mensaje, solucion, prioridad
+
+7. evaluacion_tecnica → objeto:
+   manejo_estado, legibilidad, arquitectura, performance
+
+ESCALA:
 - 90-100 → Excelente
 - 70-89  → Bueno
 - 50-69  → Regular
 - 30-49  → Deficiente
 - 0-29   → Crítico
-
-❌ NUNCA mezcles tipos:
-"errores": [{{"mensaje": "..."}}]  ← MAL
-"buenas_practicas": [{{"texto": "..."}}]  ← MAL
-
-✅ SIEMPRE:
-"buenas_practicas": ["texto", "texto"]  ← BIEN
-"malas_practicas": ["texto", "texto"]   ← BIEN
 
 Formato obligatorio:
 {esquema}
@@ -169,14 +181,32 @@ Formato obligatorio:
 
     codigo_recortado = codigo[:2500]
 
+    contexto_recortado = contexto_proyecto[:4000] if contexto_proyecto else ""
+
+    human_content = f"""
+=== CÓDIGO PRINCIPAL ===
+
+{codigo_recortado}
+"""
+
+    if contexto_recortado:
+        human_content += f"""
+
+=== CONTEXTO DEL PROYECTO ===
+
+{contexto_recortado}
+"""
+
     messages = [
         SystemMessage(content=prompt),
-        HumanMessage(content=f"Analiza este código {framework}:\n\n{codigo_recortado}")
+        HumanMessage(content=human_content)
     ]
-    print("🔥 12 - messages preparados en analizar_codigo_llm, antes de llm.ainvoke")
+
+    print("🔥 12 - messages preparados en analizar_codigo_llm")
 
     try:
         respuesta = await llm.ainvoke(messages)
+
         print("🔥 13 - llm.ainvoke completado en analizar_codigo_llm")
 
         print("🧠 RAW LLM:", respuesta.content[:300])
@@ -187,7 +217,11 @@ Formato obligatorio:
 
     except Exception as e:
         print("❌ ERROR EN ANÁLISIS PRO:", e)
+
         return _respuesta_error_analisis(str(e))
+
+
+
 
 
 # -----------------------------
