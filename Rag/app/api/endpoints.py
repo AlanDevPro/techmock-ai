@@ -37,30 +37,18 @@ NIVELES_VALIDOS     = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
 
 # =============================================================
 # 🧹 NORMALIZADORES — capa sanitizadora entre LLM y frontend
-#
-# Los LLMs no son APIs determinísticas: pueden cambiar nombres
-# de campo, omitir claves, devolver texto roto o estructura
-# inesperada. Esta capa actúa como:
-#
-#   LLM → normalizar_resultado_llm() → frontend
-#
 # =============================================================
 
 def normalizar_recomendaciones(recs) -> list:
-    """Normaliza la lista de recomendaciones del LLM."""
     if not isinstance(recs, list):
         return []
-
     resultado = []
     for r in recs:
         if not isinstance(r, dict):
             continue
-
         prioridad = r.get("prioridad", "media")
         if prioridad not in PRIORIDADES_VALIDAS:
             prioridad = "media"
-
-        # Intentar distintos nombres de campo para "solucion"
         solucion = (
             r.get("solucion")
             or r.get("solución")
@@ -68,55 +56,44 @@ def normalizar_recomendaciones(recs) -> list:
             or r.get("corrección")
             or ""
         )
-
         resultado.append({
             "mensaje":   r.get("mensaje") or r.get("descripcion") or r.get("message") or "",
             "solucion":  solucion,
             "prioridad": prioridad,
         })
-
     return resultado
 
 
 def normalizar_errores(errores) -> list:
-    """Normaliza la lista de errores detectados por el LLM."""
     if not isinstance(errores, list):
         return []
-
     resultado = []
     for e in errores:
         if not isinstance(e, dict):
             continue
-
         impacto = e.get("impacto", "medio")
         if impacto not in IMPACTOS_VALIDOS:
             impacto = "medio"
-
         resultado.append({
             "tipo":             e.get("tipo") or e.get("type") or "general",
             "descripcion":      e.get("descripcion") or e.get("descripción") or e.get("description") or "",
             "impacto":          impacto,
             "linea_aproximada": e.get("linea_aproximada") or e.get("linea") or e.get("line") or None,
         })
-
     return resultado
 
 
 def normalizar_calificacion(cal) -> dict:
-    """Normaliza el objeto de calificación general."""
     if not isinstance(cal, dict):
         return {"nivel": "Regular", "puntaje": 50, "resumen": "Sin resumen disponible."}
-
     nivel = cal.get("nivel", "Regular")
     if nivel not in NIVELES_VALIDOS:
         nivel = "Regular"
-
     try:
         puntaje = int(cal.get("puntaje", 50))
         puntaje = max(0, min(100, puntaje))
     except (TypeError, ValueError):
         puntaje = 50
-
     return {
         "nivel":   nivel,
         "puntaje": puntaje,
@@ -125,7 +102,6 @@ def normalizar_calificacion(cal) -> dict:
 
 
 def normalizar_evaluacion_tecnica(ev) -> dict:
-    """Normaliza la evaluación técnica por dimensiones."""
     default = "No evaluado."
     if not isinstance(ev, dict):
         return {
@@ -134,48 +110,29 @@ def normalizar_evaluacion_tecnica(ev) -> dict:
             "arquitectura":  default,
             "performance":   default,
         }
-
     return {
-        "manejo_estado": ev.get("manejo_estado") or ev.get("estado")    or default,
-        "legibilidad":   ev.get("legibilidad")   or ev.get("claridad")  or default,
-        "arquitectura":  ev.get("arquitectura")                          or default,
+        "manejo_estado": ev.get("manejo_estado") or ev.get("estado")     or default,
+        "legibilidad":   ev.get("legibilidad")   or ev.get("claridad")   or default,
+        "arquitectura":  ev.get("arquitectura")                           or default,
         "performance":   ev.get("performance")   or ev.get("rendimiento") or default,
     }
 
 
 def normalizar_lista_strings(valor) -> list:
-    """Garantiza que el valor sea una lista de strings no vacíos."""
     if not isinstance(valor, list):
         return []
     return [str(item) for item in valor if item]
 
 
 def normalizar_resultado_llm(resultado: dict) -> dict:
-    """
-    Punto de entrada principal del sanitizador.
-    Normaliza toda la respuesta del LLM antes de enviarla al frontend.
-    """
     print("🧠 Respuesta RAW LLM:", resultado)
-
     return {
-        "calificacion_general": normalizar_calificacion(
-            resultado.get("calificacion_general")
-        ),
-        "errores": normalizar_errores(
-            resultado.get("errores", [])
-        ),
-        "buenas_practicas": normalizar_lista_strings(
-            resultado.get("buenas_practicas", [])
-        ),
-        "malas_practicas": normalizar_lista_strings(
-            resultado.get("malas_practicas", [])
-        ),
-        "recomendaciones": normalizar_recomendaciones(
-            resultado.get("recomendaciones", [])
-        ),
-        "evaluacion_tecnica": normalizar_evaluacion_tecnica(
-            resultado.get("evaluacion_tecnica")
-        ),
+        "calificacion_general": normalizar_calificacion(resultado.get("calificacion_general")),
+        "errores":              normalizar_errores(resultado.get("errores", [])),
+        "buenas_practicas":     normalizar_lista_strings(resultado.get("buenas_practicas", [])),
+        "malas_practicas":      normalizar_lista_strings(resultado.get("malas_practicas", [])),
+        "recomendaciones":      normalizar_recomendaciones(resultado.get("recomendaciones", [])),
+        "evaluacion_tecnica":   normalizar_evaluacion_tecnica(resultado.get("evaluacion_tecnica")),
     }
 
 
@@ -195,33 +152,138 @@ def leer_archivo_interno(ruta: str) -> str:
         return "No existe conocimiento técnico indexado sobre este framework."
 
 
+def _extraer_proyecto_raiz(active_file: str) -> str:
+    """
+    Extrae el directorio raíz del proyecto a partir del archivo activo.
+    Ejemplo: '/practica-vue/src/App.vue' → 'practica-vue'
+    """
+    if not active_file:
+        return ""
+    # Normalizar separadores y limpiar slash inicial
+    partes = active_file.replace("\\", "/").lstrip("/").split("/")
+    return partes[0] if partes else ""
+
+
 def _construir_contexto_proyecto(
     active_file: str,
     files: dict,
     framework: str,
 ) -> str:
     """
-    Construye un contexto textual del proyecto completo para que el LLM
+    Construye un contexto textual del proyecto activo para que el LLM
     entienda la arquitectura, imports y composición.
-    Limita a los archivos más relevantes para no exceder tokens.
+
+    ✅ FILTRA por proyecto raíz del archivo activo para evitar mezclar
+    practica-vue con practica-nextjs u otros proyectos del workspace.
     """
+
+    # ================================================================
+    # 🔍 DEBUG: DIAGNÓSTICO DE ENTRADA A _construir_contexto_proyecto
+    # ================================================================
+    print("\n" + "="*80)
+    print("📂 _construir_contexto_proyecto — DIAGNÓSTICO DE CONTEXTO")
+    print("="*80)
+    print(f"📌 Framework declarado : {framework}")
+    print(f"📌 Archivo activo      : {active_file or '(ninguno)'}")
+    print(f"📌 Total archivos recibidos del frontend: {len(files)}")
+
     if not files:
+        print("⚠️  files está VACÍO — el contexto será vacío string")
+        print("="*80 + "\n")
         return ""
 
+    # ── Listar TODOS los archivos que llegaron del frontend ──────────
+    print("\n📋 TODOS LOS ARCHIVOS RECIBIDOS:")
+    for i, ruta in enumerate(sorted(files.keys()), 1):
+        tamanio = len(files[ruta]) if files[ruta] else 0
+        print(f"  {i:>2}. {ruta}  ({tamanio} chars)")
+
+    # ── Detectar proyectos únicos presentes ─────────────────────────
+    proyectos_presentes = set()
+    for ruta in files:
+        raiz = ruta.replace("\\", "/").lstrip("/").split("/")[0]
+        if raiz:
+            proyectos_presentes.add(raiz)
+
+    print(f"\n🗂️  PROYECTOS DETECTADOS EN files: {sorted(proyectos_presentes)}")
+
+    # ── Extraer y validar proyecto raíz del archivo activo ──────────
+    proyecto_root = _extraer_proyecto_raiz(active_file)
+    print(f"📁 PROYECTO RAÍZ DETECTADO (desde active_file): '{proyecto_root}'")
+
+    if not proyecto_root:
+        print("⚠️  No se pudo detectar proyecto raíz — se incluirán TODOS los archivos (riesgo de mezcla)")
+    else:
+        print(f"✅ Se filtrarán archivos que NO pertenezcan a: '{proyecto_root}'")
+
+    # ── Filtrar archivos por proyecto raíz ──────────────────────────
+    if proyecto_root:
+        archivos_filtrados = {
+            ruta: contenido
+            for ruta, contenido in files.items()
+            if ruta.replace("\\", "/").lstrip("/").startswith(proyecto_root)
+        }
+        archivos_excluidos = [
+            ruta for ruta in files
+            if ruta not in archivos_filtrados
+        ]
+    else:
+        archivos_filtrados = dict(files)
+        archivos_excluidos = []
+
+    print(f"\n✅ ARCHIVOS INCLUIDOS TRAS FILTRO ({len(archivos_filtrados)}):")
+    for i, ruta in enumerate(sorted(archivos_filtrados.keys()), 1):
+        tamanio = len(archivos_filtrados[ruta]) if archivos_filtrados[ruta] else 0
+        print(f"  {i:>2}. {ruta}  ({tamanio} chars)")
+
+    if archivos_excluidos:
+        print(f"\n🚫 ARCHIVOS EXCLUIDOS POR FILTRO DE PROYECTO ({len(archivos_excluidos)}):")
+        for ruta in sorted(archivos_excluidos):
+            print(f"       - {ruta}")
+    else:
+        print("\n✅ Sin archivos excluidos (todos pertenecen al mismo proyecto raíz)")
+
+    # ── Selección y truncamiento ─────────────────────────────────────
     MAX_FILES          = 8
     MAX_CHARS_PER_FILE = 800
 
-    prioridad     = [active_file] + [k for k in files if k != active_file]
+    prioridad     = [active_file] + [k for k in archivos_filtrados if k != active_file]
     seleccionados = prioridad[:MAX_FILES]
 
+    print(f"\n📦 ARCHIVOS SELECCIONADOS PARA EL CONTEXTO (máx {MAX_FILES}):")
+    for i, ruta in enumerate(seleccionados, 1):
+        contenido  = archivos_filtrados.get(ruta, "")
+        chars_orig = len(contenido)
+        chars_env  = min(chars_orig, MAX_CHARS_PER_FILE)
+        truncado   = "⚠️ TRUNCADO" if chars_orig > MAX_CHARS_PER_FILE else "✅ completo"
+        print(f"  {i}. {ruta}")
+        print(f"     chars originales: {chars_orig} → chars enviados: {chars_env}  [{truncado}]")
+
+    chars_totales_contexto = sum(
+        min(len(archivos_filtrados.get(r, "")), MAX_CHARS_PER_FILE)
+        for r in seleccionados
+    )
+    print(f"\n📊 TAMAÑO ESTIMADO DEL CONTEXTO FINAL: ~{chars_totales_contexto} chars")
+
+    if len(archivos_filtrados) > MAX_FILES:
+        omitidos = list(archivos_filtrados.keys())[MAX_FILES:]
+        print(f"\n⚠️  ARCHIVOS OMITIDOS POR LÍMITE DE {MAX_FILES} (no entran al contexto):")
+        for ruta in omitidos:
+            print(f"       - {ruta}")
+
+    print("="*80 + "\n")
+    # ================================================================
+
+    # ── Construcción del string de contexto ─────────────────────────
     lineas = [
         f"=== Estructura del proyecto ({framework}) ===",
+        f"Proyecto raíz : {proyecto_root or 'desconocido'}",
         f"Archivo activo: {active_file}",
         "",
     ]
 
     for ruta in seleccionados:
-        contenido = files.get(ruta, "")
+        contenido = archivos_filtrados.get(ruta, "")
         if not contenido:
             continue
         preview = contenido[:MAX_CHARS_PER_FILE]
@@ -244,10 +306,6 @@ async def generar_preguntas_vue_get(
     usuario_id: str = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Genera una pregunta técnica de Vue.js con el LLM y la persiste en la BD.
-    Crea también una sesión de entrevista si se provee usuario_id.
-    """
     print("👉 Endpoint Vue llamado")
     contexto  = leer_archivo_interno(VUE_FILE)
     resultado = await generar_evaluacion_llm(contexto, "Vue.js")
@@ -273,9 +331,6 @@ async def generar_preguntas_next_get(
     usuario_id: str = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Genera una pregunta técnica de Next.js con el LLM y la persiste en la BD.
-    """
     print("👉 Endpoint Next llamado")
     contexto  = leer_archivo_interno(NEXT_FILE)
     resultado = await generar_evaluacion_llm(contexto, "Next.js")
@@ -305,10 +360,6 @@ async def analizar_codigo(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Analiza el código enviado con el LLM y persiste el resultado.
-    Acepta sesion_id, usuario_id, active_file y files (multi-archivo).
-    """
     print("👉 Endpoint analizar código llamado")
 
     codigo         = data.get("codigo", "").strip()
@@ -317,6 +368,22 @@ async def analizar_codigo(
     usuario_id_str = data.get("usuario_id")
     active_file    = data.get("active_file", "")
     files          = data.get("files", {})
+
+    # ================================================================
+    # 🔍 DEBUG: PAYLOAD RECIBIDO DEL FRONTEND
+    # ================================================================
+    print("\n" + "="*80)
+    print("📥 PAYLOAD RECIBIDO EN /analizar-codigo")
+    print("="*80)
+    print(f"  framework      : {framework}")
+    print(f"  active_file    : {active_file or '(vacío)'}")
+    print(f"  sesion_id      : {sesion_id_str or '(sin sesión)'}")
+    print(f"  usuario_id     : {usuario_id_str or '(sin usuario)'}")
+    print(f"  len(codigo)    : {len(codigo)} chars")
+    print(f"  len(files)     : {len(files)} archivos")
+    print(f"  files keys     : {sorted(files.keys()) if files else '[]'}")
+    print("="*80 + "\n")
+    # ================================================================
 
     if not codigo:
         print("❌ Código vacío")
@@ -338,6 +405,14 @@ async def analizar_codigo(
         framework=framework,
     )
 
+    # ── Resumen post-construcción ────────────────────────────────────
+    print("\n" + "-"*60)
+    print("📊 RESUMEN CONTEXTO CONSTRUIDO")
+    print("-"*60)
+    print(f"  Tamaño contexto_proyecto : {len(contexto_proyecto)} chars")
+    print(f"  Contexto vacío           : {'SÍ ⚠️' if not contexto_proyecto else 'NO ✅'}")
+    print("-"*60 + "\n")
+
     print("⏳ Enviando código a LLM con contexto multi-archivo...")
     resultado_raw = await analizar_codigo_llm(
         codigo=codigo,
@@ -345,10 +420,8 @@ async def analizar_codigo(
         contexto_proyecto=contexto_proyecto,
     )
 
-    # ✅ NORMALIZAR: sanitizar antes de retornar al frontend
     resultado = normalizar_resultado_llm(resultado_raw)
 
-    # Persistir si hay sesión activa (recibe resultado ya normalizado)
     if sesion_id_str:
         await _persistir_analisis_codigo(
             db=db,
@@ -361,16 +434,12 @@ async def analizar_codigo(
     return resultado
 
 
-# ✅ NUEVO: Obtener resultado de sesión
+# ✅ Obtener resultado de sesión
 @router.get("/sesion/{sesion_id}/resultado")
 async def obtener_resultado_sesion(
     sesion_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retorna el resultado completo de una sesión de entrevista.
-    El frontend principal consulta este endpoint en lugar de postMessage.
-    """
     print(f"👉 Consultando resultado de sesión: {sesion_id}")
 
     try:
@@ -386,16 +455,12 @@ async def obtener_resultado_sesion(
     return sesion
 
 
-# ✅ NUEVO: Guardar borrador (autosave)
+# ✅ Guardar borrador (autosave)
 @router.post("/guardar-borrador")
 async def guardar_borrador(
     data: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Guarda un borrador del código durante la sesión (autosave).
-    Falla silenciosamente si la sesión no existe.
-    """
     sesion_id_str = data.get("sesion_id")
     codigo        = data.get("codigo", "").strip()
     active_file   = data.get("active_file", "")
@@ -438,10 +503,6 @@ async def _persistir_pregunta_y_sesion(
     usuario_id: str | None,
     request: Request,
 ):
-    """
-    Guarda la pregunta generada y opcionalmente crea una sesión de entrevista.
-    Falla silenciosamente para no interrumpir la respuesta al frontend.
-    """
     sesion = None
 
     try:
@@ -499,11 +560,6 @@ async def _persistir_analisis_codigo(
     framework: str,
     resultado: dict,
 ) -> None:
-    """
-    Guarda el código enviado y la evaluación del LLM en la BD.
-    Falla silenciosamente para no interrumpir la respuesta al frontend.
-    Recibe `resultado` ya normalizado.
-    """
     try:
         sesion_id = uuid.UUID(sesion_id_str)
 
@@ -549,7 +605,7 @@ async def _persistir_analisis_codigo(
                 linea_aproximada=error.get("linea_aproximada"),
             )
 
-            recomendaciones = resultado.get("recomendaciones", [])
+        recomendaciones = resultado.get("recomendaciones", [])
 
         for rec in recomendaciones:
             await repo.crear_recomendacion_solucion(
@@ -560,7 +616,7 @@ async def _persistir_analisis_codigo(
                 prioridad=rec.get("prioridad"),
             )
 
-            evaluacion_tecnica = resultado.get("evaluacion_tecnica", {})
+        evaluacion_tecnica = resultado.get("evaluacion_tecnica", {})
 
         await repo.crear_detalle_evaluacion(
             db=db,
@@ -576,14 +632,13 @@ async def _persistir_analisis_codigo(
                 db=db,
                 usuario_id=sesion.usuario_id,
                 puntaje=puntaje,
-        )
+            )
         if sesion.usuario_id:
             await repo.actualizar_perfil_tecnico(
                 db=db,
                 usuario_id=sesion.usuario_id,
                 evaluacion_tecnica=evaluacion_tecnica,
-        )
-
+            )
 
         await repo.finalizar_sesion(db=db, sesion_id=sesion_id)
 

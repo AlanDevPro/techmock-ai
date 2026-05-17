@@ -61,6 +61,7 @@ Formato obligatorio:
     print("🔥 8 - messages preparados, antes de llm.ainvoke")
 
     try:
+        
         respuesta = await llm.ainvoke(messages)
         print("🔥 9 - llm.ainvoke completado")
         data = _safe_json_load(respuesta.content)
@@ -204,6 +205,70 @@ Formato obligatorio:
 
     print("🔥 12 - messages preparados en analizar_codigo_llm")
 
+    # ================================================================
+    # 🧠 DEBUG: VER EXACTAMENTE QUÉ RECIBE EL LLM
+    # ================================================================
+    print("\n" + "="*80)
+    print("🧠 PROMPT FINAL ENVIADO AL LLM")
+    print("="*80)
+
+    print("\n📌 SYSTEM PROMPT:\n")
+    print(prompt[:3000])
+
+    print("\n📌 HUMAN CONTENT:\n")
+    print(human_content[:8000])
+
+    print("\n📌 TAMAÑO CÓDIGO:", len(codigo))
+    print("📌 TAMAÑO CÓDIGO RECORTADO:", len(codigo_recortado))
+
+    print("📌 TAMAÑO CONTEXTO:", len(contexto_proyecto))
+    print("📌 TAMAÑO CONTEXTO RECORTADO:", len(contexto_recortado))
+
+    # ----------------------------------------------------------------
+    # 🔍 DETECCIÓN DE FRAMEWORK EN CÓDIGO Y CONTEXTO
+    # ----------------------------------------------------------------
+    print("\n" + "-"*60)
+    print("🔍 DIAGNÓSTICO DE FRAMEWORK Y DIRECTORIOS")
+    print("-"*60)
+
+    # Detectar framework real en el código
+    framework_detectado = []
+    if "<template>" in codigo or "defineComponent" in codigo or "ref(" in codigo or "vue" in codigo.lower():
+        framework_detectado.append("Vue")
+    if "next/" in codigo or "getServerSideProps" in codigo or "getStaticProps" in codigo or "next" in codigo.lower():
+        framework_detectado.append("Next.js")
+    if "react" in codigo.lower() or "useState" in codigo or "useEffect" in codigo or "jsx" in codigo.lower():
+        framework_detectado.append("React")
+
+    print(f"📌 FRAMEWORK DECLARADO (parámetro): {framework}")
+    print(f"📌 FRAMEWORK DETECTADO EN CÓDIGO:   {framework_detectado if framework_detectado else ['No detectado claramente']}")
+
+    # Detectar directorios en el contexto
+    directorios_detectados = []
+    if contexto_recortado:
+        if "practica-vue" in contexto_recortado or "practica_vue" in contexto_recortado:
+            directorios_detectados.append("practica-vue")
+        if "practica-nextjs" in contexto_recortado or "practica_nextjs" in contexto_recortado or "next.js" in contexto_recortado.lower():
+            directorios_detectados.append("practica-nextjs")
+
+    print(f"📌 DIRECTORIOS DETECTADOS EN CONTEXTO: {directorios_detectados if directorios_detectados else ['Ninguno detectado / contexto vacío']}")
+    print(f"📌 CONTEXTO VACÍO: {'SÍ ⚠️' if not contexto_recortado else 'NO ✅'}")
+
+    # Primeras líneas del código para identificar qué archivo es
+    primeras_lineas_codigo = "\n".join(codigo.splitlines()[:8])
+    print(f"\n📌 PRIMERAS 8 LÍNEAS DEL CÓDIGO ANALIZADO:\n{primeras_lineas_codigo}")
+
+    # Primeras líneas del contexto para ver qué archivos entran
+    if contexto_recortado:
+        primeras_lineas_contexto = "\n".join(contexto_recortado.splitlines()[:15])
+        print(f"\n📌 PRIMERAS 15 LÍNEAS DEL CONTEXTO:\n{primeras_lineas_contexto}")
+    else:
+        print("\n⚠️  CONTEXTO VACÍO - El LLM analizará sin contexto de proyecto")
+
+    print("-"*60 + "\n")
+    print("="*80 + "\n")
+    # ================================================================
+
     try:
         respuesta = await llm.ainvoke(messages)
 
@@ -219,9 +284,6 @@ Formato obligatorio:
         print("❌ ERROR EN ANÁLISIS PRO:", e)
 
         return _respuesta_error_analisis(str(e))
-
-
-
 
 
 # -----------------------------
@@ -319,7 +381,6 @@ def _asegurar_lista_strings(valor) -> list:
         if isinstance(item, str):
             result.append(item)
         elif isinstance(item, dict):
-            # Extraer cualquier campo de texto si viene como objeto por error
             for key in ("mensaje", "descripcion", "texto", "text"):
                 if key in item:
                     result.append(str(item[key]))
