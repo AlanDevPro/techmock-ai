@@ -169,6 +169,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+
+  
+
   console.log('🔄 [AUTH PROVIDER] render → loading:', loading, '| user:', user?.email ?? null);
 
   // ── useEffect #1 — Restaurar sesión desde localStorage ──────────────────

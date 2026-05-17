@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ActivityBar, { ActivityView } from "./ActivityBar";
 import LeftPanel from "./LeftPanel";
@@ -20,10 +20,15 @@ export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => voi
 });
 export const useTheme = () => useContext(ThemeContext);
 
-// ✅ Helpers para leer URL en el inicializador de useState (solo en cliente)
-function getInitialFramework(): "vuejs" | "nextjs" | null {
+// ─── URL helpers (solo cliente) ───────────────────────────────────────────────
+
+function getParam(key: string): string | null {
   if (typeof window === "undefined") return null;
-  const fw = new URLSearchParams(window.location.search).get("framework");
+  return new URLSearchParams(window.location.search).get(key);
+}
+
+function getInitialFramework(): "vuejs" | "nextjs" | null {
+  const fw = getParam("framework");
   return fw === "vuejs" || fw === "nextjs" ? fw : null;
 }
 
@@ -33,15 +38,36 @@ function getInitialActiveFile(framework: "vuejs" | "nextjs" | null): string {
   return "/src/App.vue";
 }
 
+// ✅ MEJORA: leer sesion_id desde URL
+function getInitialSessionId(): string | null {
+  return getParam("sesion_id");
+}
+
+// ✅ MEJORA: leer usuario_id desde URL
+function getInitialUsuarioId(): string | null {
+  return getParam("usuario_id");
+}
+
+// ✅ MEJORA: modo entrevista vs práctica libre
+function getInterviewMode(): boolean {
+  return getParam("mode") === "interview";
+}
+
+// ─── Componente principal ──────────────────────────────────────────────────────
+
 export default function IDE() {
   const router = useRouter();
   const [theme, setTheme] = useState<Theme>("dark");
 
-  // ✅ Error 2 resuelto: inicializadores lazy en lugar de useEffect + setState
   const [selectedFramework] = useState<"vuejs" | "nextjs" | null>(getInitialFramework);
   const [activeFile, setActiveFile] = useState<string>(() =>
     getInitialActiveFile(getInitialFramework())
   );
+
+  // ✅ MEJORAS: sesion_id, usuario_id, modo entrevista
+  const [sesionId] = useState<string | null>(getInitialSessionId);
+  const [usuarioId] = useState<string | null>(getInitialUsuarioId);
+  const [isInterviewMode] = useState<boolean>(getInterviewMode);
 
   const [fileSystem, setFileSystem] = useState<{ [key: string]: string }>({});
   const [isBooting, setIsBooting] = useState(true);
@@ -49,15 +75,16 @@ export default function IDE() {
   const [isBootingUi, setIsBootingUi] = useState(true);
   const [activeView, setActiveView] = useState<ActivityView>("explorer");
   const [submitStatus, setSubmitStatus] = useState<null | "running" | "success" | "error">(null);
+  const [submitMessage, setSubmitMessage] = useState<string>("");
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(400);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
 
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(!isInterviewMode);
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 
-  const [isTerminalVisible, setIsTerminalVisible] = useState(true);
+  const [isTerminalVisible, setIsTerminalVisible] = useState(!isInterviewMode);
   const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
@@ -66,16 +93,15 @@ export default function IDE() {
 
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // ✅ Error 1 resuelto: useMemo en lugar de useEffect + setState
-  // Los diagnósticos son derivación pura de activeFile + fileSystem, no necesitan estado propio
+  // ✅ Diagnósticos derivados (sin estado extra)
   const diagnostics = useMemo(() => {
     const content = fileSystem[activeFile];
     if (!content) return { errors: 0, warnings: 0, infos: 0 };
 
     let errors = 0, warnings = 0, infos = 0;
 
-    errors   += (content.match(/error/i)         ?? []).length;
-    warnings += (content.match(/warning/i)       ?? []).length;
+    errors   += (content.match(/error/i)           ?? []).length;
+    warnings += (content.match(/warning/i)         ?? []).length;
     infos    += (content.match(/TODO|FIXME|HACK/i) ?? []).length;
 
     if (content.includes("undefined"))      errors++;
@@ -87,9 +113,9 @@ export default function IDE() {
     return { errors, warnings, infos };
   }, [activeFile, fileSystem]);
 
-  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-  const togglePreviewVisibility  = () => setIsPreviewVisible((v) => !v);
-  const toggleSidebarVisibility  = () => setIsSidebarVisible((v) => !v);
+  const toggleTheme             = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const togglePreviewVisibility = () => setIsPreviewVisible((v) => !v);
+  const toggleSidebarVisibility = () => setIsSidebarVisible((v) => !v);
   const toggleTerminalVisibility = () => setIsTerminalVisible((v) => !v);
 
   const handleViewChange = (view: ActivityView) => {
@@ -142,6 +168,7 @@ export default function IDE() {
           "--btn-submit-hover": "#1e8e31",
         };
 
+  // Boot WebContainer
   useEffect(() => {
     let mounted = true;
     bootWebContainer().then(() => {
@@ -158,6 +185,29 @@ export default function IDE() {
     const timer = setTimeout(() => setIsBootingUi(false), 5000);
     return () => clearTimeout(timer);
   }, [isBooting]);
+
+  // ✅ MEJORA: Autosave cada 15 segundos en modo entrevista
+  useEffect(() => {
+    if (!isInterviewMode || !sesionId || isBooting) return;
+
+    const interval = setInterval(async () => {
+      const codigo = fileSystem[activeFile];
+      if (!codigo || !codigo.trim()) return;
+
+      try {
+        await codeService.guardarBorrador({
+          sesion_id: sesionId,
+          codigo,
+          active_file: activeFile,
+        });
+        console.log("💾 Borrador guardado automáticamente");
+      } catch (err) {
+        console.warn("⚠️ Error en autosave (no bloquea):", err);
+      }
+    }, 15_000);
+
+    return () => clearInterval(interval);
+  }, [isInterviewMode, sesionId, isBooting, activeFile, fileSystem]);
 
   // Redimensionamiento del preview
   useEffect(() => {
@@ -248,14 +298,23 @@ export default function IDE() {
   };
 
   const handleSelectFileWithLine = (file: string, line?: number) => {
-    console.log("📄 handleSelectFileWithLine llamado con:", file);
+    // ✅ MEJORA: en modo entrevista, restringir archivos fuera del ejercicio
+    if (isInterviewMode) {
+      const allowedPrefixes = selectedFramework === "vuejs"
+        ? ["/practica-vue/"]
+        : ["/practica-nextjs/"];
+      const allowed = allowedPrefixes.some((p) => file.startsWith(p));
+      if (!allowed) {
+        console.warn("🚫 Archivo fuera del ejercicio bloqueado en modo entrevista:", file);
+        return;
+      }
+    }
     setActiveFile(file);
     if (line) console.log(`Navegar a línea ${line} en el archivo ${file}`);
   };
 
   const handleSelectFile = (file: string) => {
-    console.log("📄 handleSelectFile llamado con:", file);
-    setActiveFile(file);
+    handleSelectFileWithLine(file);
   };
 
   const handleRunTests = async () => {
@@ -268,10 +327,12 @@ export default function IDE() {
   const handleSubmitCode = async () => {
     console.log("🚀 Iniciando handleSubmitCode...");
     setSubmitStatus("running");
+    setSubmitMessage("Analizando código...");
 
     if (!fileSystem[activeFile]) {
       console.error("❌ El archivo activo no existe en fileSystem:", activeFile);
       setSubmitStatus("error");
+      setSubmitMessage("El archivo activo no existe");
       setTimeout(() => setSubmitStatus(null), 3000);
       return;
     }
@@ -280,65 +341,51 @@ export default function IDE() {
     if (!codigoCompleto || codigoCompleto.trim().length === 0) {
       console.error("❌ No hay código válido para enviar");
       setSubmitStatus("error");
+      setSubmitMessage("No hay código para enviar");
       setTimeout(() => setSubmitStatus(null), 3000);
       return;
     }
 
+    // ✅ MEJORA: framework mapeado correctamente
     const frameworkApi = codeService.resolverFrameworkApi(selectedFramework);
     console.log("🎯 Framework:", selectedFramework, "→ API:", frameworkApi);
 
     try {
+      // ✅ MEJORA: enviar sesion_id, usuario_id, files, active_file
       const resultado = await codeService.analizarCodigo({
         codigo: codigoCompleto,
         framework: frameworkApi,
+        sesion_id: sesionId,
+        usuario_id: usuarioId,
+        active_file: activeFile,
+        files: fileSystem,
       });
 
-      const resultadoJson = JSON.stringify(resultado);
-      sessionStorage.setItem("analisis_resultado", resultadoJson);
-
       setSubmitStatus("success");
+      setSubmitMessage("¡Análisis completado!");
 
-      // DESPUÉS — siempre abre el analisis en el frontend correctamente
-      const analysisOrigin = "http://localhost:3000";
-      const analysisUrl = `${analysisOrigin}/dashboard/developer/interviews/analisis`;
+      // ✅ MEJORA: redirigir por sesion_id (el backend es la fuente de verdad)
+      const frontendOrigin = process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000";
 
-      // Guardar en sessionStorage del IDE (no sirve cross-origin, pero postMessage sí)
-      const analysisWindow = window.open(analysisUrl, "_blank");
-
-      if (analysisWindow) {
-        const sendAnalysis = () => {
-          analysisWindow.postMessage(
-            {
-              type: "analysis_result",
-              payload: resultado,
-            },
-            analysisOrigin
-          );
-        };
-      
-        // Esperar carga real
-        analysisWindow.onload = sendAnalysis;
-      
-        // fallback
-        setTimeout(sendAnalysis, 1500);
-  
-      } else {
-        // Fallback: pasar por query param (la página lo leerá)
+      if (sesionId) {
+        // El frontend principal consulta el resultado desde el backend usando sesion_id
         window.open(
-          `${analysisUrl}?analysis=${encodeURIComponent(resultadoJson)}`,
+          `${frontendOrigin}/dashboard/developer/interviews/analisis/${sesionId}`,
+          "_blank"
+        );
+      } else {
+        // Fallback: pasar resultado completo por query param (solo si no hay sesión)
+        const resultadoJson = encodeURIComponent(JSON.stringify(resultado));
+        window.open(
+          `${frontendOrigin}/dashboard/developer/interviews/analisis?analysis=${resultadoJson}`,
           "_blank"
         );
       }
 
-      setSubmitStatus("success");
-
-
-
-
-
     } catch (error) {
       console.error("❌ Error al analizar código:", error);
       setSubmitStatus("error");
+      setSubmitMessage("Error al analizar el código");
       setTimeout(() => setSubmitStatus(null), 3000);
     }
   };
@@ -370,6 +417,21 @@ export default function IDE() {
           activeFile={activeFile}
         />
 
+        {/* ✅ MEJORA: banner de modo entrevista */}
+        {isInterviewMode && (
+          <div
+            className="flex items-center justify-center px-4 text-[11px] font-semibold uppercase tracking-widest shrink-0"
+            style={{ background: "#b45309", color: "#fef3c7", height: "22px" }}
+          >
+            🎯 Modo Entrevista Activo
+            {sesionId && (
+              <span className="ml-3 opacity-60 normal-case tracking-normal font-normal">
+                sesión: {sesionId.slice(0, 8)}…
+              </span>
+            )}
+          </div>
+        )}
+
         <div
           className="flex items-center justify-between px-4 text-[12px] select-none shrink-0 border-b"
           style={{
@@ -392,9 +454,14 @@ export default function IDE() {
           </div>
           <div className="flex items-center gap-2">
             {[
-              { label: "Sidebar",  active: isSidebarVisible,  toggle: toggleSidebarVisibility },
+              // ✅ MEJORA: ocultar Sidebar y Terminal controles en modo entrevista si están deshabilitados
+              ...(!isInterviewMode
+                ? [{ label: "Sidebar",  active: isSidebarVisible,  toggle: toggleSidebarVisibility }]
+                : []),
               { label: "Preview",  active: isPreviewVisible,  toggle: togglePreviewVisibility },
-              { label: "Terminal", active: isTerminalVisible, toggle: toggleTerminalVisibility },
+              ...(!isInterviewMode
+                ? [{ label: "Terminal", active: isTerminalVisible, toggle: toggleTerminalVisibility }]
+                : []),
             ].map(({ label, active, toggle }) => (
               <span
                 key={label}
@@ -416,7 +483,8 @@ export default function IDE() {
           <LeftPanel />
           <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
 
-          {isSidebarVisible && (
+          {/* ✅ MEJORA: sidebar oculto en modo entrevista */}
+          {isSidebarVisible && !isInterviewMode && (
             <>
               <Sidebar
                 activeView={activeView}
@@ -447,7 +515,9 @@ export default function IDE() {
               className="flex-1 min-h-0 relative flex flex-row"
               style={{
                 background: "var(--bg-primary)",
-                height: isTerminalVisible ? `calc(100% - ${terminalHeight}px)` : "100%",
+                height: isTerminalVisible && !isInterviewMode
+                  ? `calc(100% - ${terminalHeight}px)`
+                  : "100%",
                 transition: isResizingTerminal ? "none" : "height 0.2s ease",
               }}
             >
@@ -506,7 +576,8 @@ export default function IDE() {
               )}
             </div>
 
-            {isTerminalVisible && (
+            {/* ✅ MEJORA: terminal oculta en modo entrevista */}
+            {isTerminalVisible && !isInterviewMode && (
               <div
                 className="cursor-ns-resize hover:bg-accent transition-colors"
                 style={{
@@ -518,7 +589,7 @@ export default function IDE() {
               />
             )}
 
-            {isTerminalVisible && (
+            {isTerminalVisible && !isInterviewMode && (
               <div
                 className="border-t flex flex-col shrink-0"
                 style={{
@@ -553,21 +624,29 @@ export default function IDE() {
               </div>
             )}
 
-            {!isTerminalVisible && (
+            {/* Barra inferior con Submit (visible cuando terminal oculta o siempre en entrevista) */}
+            {(!isTerminalVisible || isInterviewMode) && (
               <div
                 className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
                 style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
               >
                 {submitStatus === "running" && (
                   <span className="text-[12px] animate-pulse" style={{ color: "var(--text-secondary)" }}>
-                    Analizando código...
+                    {submitMessage || "Analizando código..."}
                   </span>
                 )}
                 {submitStatus === "success" && (
-                  <span className="text-[12px] text-green-400 font-semibold">✓ Completado</span>
+                  <span className="text-[12px] text-green-400 font-semibold">✓ {submitMessage || "Completado"}</span>
                 )}
                 {submitStatus === "error" && (
-                  <span className="text-[12px] text-red-400 font-semibold">✗ Error al analizar</span>
+                  <span className="text-[12px] text-red-400 font-semibold">✗ {submitMessage || "Error al analizar"}</span>
+                )}
+
+                {/* ✅ MEJORA: autosave indicator en modo entrevista */}
+                {isInterviewMode && sesionId && submitStatus === null && (
+                  <span className="text-[11px] opacity-50" style={{ color: "var(--text-secondary)" }}>
+                    💾 Autosave activo
+                  </span>
                 )}
 
                 <button

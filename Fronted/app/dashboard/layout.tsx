@@ -14,18 +14,35 @@ export default function DashboardLayout({
   const router = useRouter();
 
   useEffect(() => {
-  console.log('🏠 [LAYOUT] useEffect → loading:', loading, '| user:', user?.email ?? null);
-  if (loading) return;
-  if (!user) {
-    console.warn('🏠 [LAYOUT] Sin usuario → redirigiendo a /auth');
-    router.push('/auth');
-  }
-}, [user, loading, router]);
+    console.log(
+      '🏠 [LAYOUT] useEffect → loading:',
+      loading,
+      '| user:',
+      user?.email ?? null
+    );
 
-// Y en el render:
-console.log('🏠 [LAYOUT] render → loading:', loading, '| user:', user?.email ?? null);
+    // ⛔ esperar a que termine loading
+    if (loading) return;
 
-  // ⛔ mientras carga NO renderizar nada protegido
+    // ⛔ no autenticado
+    if (!user) {
+      console.warn(
+        '🏠 [LAYOUT] Sin usuario → redirigiendo a /auth'
+      );
+
+      router.replace('/auth');
+    }
+
+  }, [loading, user, router]);
+
+  console.log(
+    '🏠 [LAYOUT] render → loading:',
+    loading,
+    '| user:',
+    user?.email ?? null
+  );
+
+  // ⛔ spinner mientras carga auth
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -34,11 +51,12 @@ console.log('🏠 [LAYOUT] render → loading:', loading, '| user:', user?.email
     );
   }
 
-  // ⛔ si terminó loading y no hay user
+  // ⛔ evitar render del dashboard sin auth
   if (!user) {
     return null;
   }
 
+  // ✅ usuario autenticado
   return (
     <div className="min-h-screen bg-black text-white">
       {children}
