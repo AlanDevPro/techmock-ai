@@ -43,17 +43,20 @@ class Tecnologia(Base):
     preguntas = relationship("Pregunta", back_populates="tecnologia")
     sesiones = relationship("SesionEntrevista", back_populates="tecnologia")
     estadisticas_tecnologia_favorita = relationship(
-        "EstadisticasUsuario", back_populates="tecnologia_favorita",
-        foreign_keys="EstadisticasUsuario.tecnologia_favorita_id"
+        "EstadisticasUsuario",
+        back_populates="tecnologia_favorita",
+        foreign_keys="EstadisticasUsuario.tecnologia_favorita_id",
     )
     categorias_error = relationship("CategoriaError", back_populates="tecnologia")
     perfil_mejor_tecnologia = relationship(
-        "PerfilTecnicoUsuario", back_populates="mejor_tecnologia",
-        foreign_keys="PerfilTecnicoUsuario.mejor_tecnologia_id"
+        "PerfilTecnicoUsuario",
+        back_populates="mejor_tecnologia",
+        foreign_keys="PerfilTecnicoUsuario.mejor_tecnologia_id",
     )
     perfil_peor_tecnologia = relationship(
-        "PerfilTecnicoUsuario", back_populates="peor_tecnologia",
-        foreign_keys="PerfilTecnicoUsuario.peor_tecnologia_id"
+        "PerfilTecnicoUsuario",
+        back_populates="peor_tecnologia",
+        foreign_keys="PerfilTecnicoUsuario.peor_tecnologia_id",
     )
 
 
@@ -151,10 +154,14 @@ class Usuario(Base):
     estadisticas = relationship("EstadisticasUsuario", back_populates="usuario", uselist=False)
     perfil_tecnico = relationship("PerfilTecnicoUsuario", back_populates="usuario", uselist=False)
     contactos_enviados = relationship(
-        "ContactoReclutamiento", foreign_keys="ContactoReclutamiento.admin_id", back_populates="admin"
+        "ContactoReclutamiento",
+        foreign_keys="ContactoReclutamiento.admin_id",
+        back_populates="admin",
     )
     contactos_recibidos = relationship(
-        "ContactoReclutamiento", foreign_keys="ContactoReclutamiento.developer_id", back_populates="developer"
+        "ContactoReclutamiento",
+        foreign_keys="ContactoReclutamiento.developer_id",
+        back_populates="developer",
     )
     notificaciones = relationship("Notificacion", back_populates="usuario", cascade="all, delete-orphan")
 
@@ -180,7 +187,7 @@ class AuthProvider(Base):
         CheckConstraint(
             "(provider = 'password' AND password_hash IS NOT NULL) OR "
             "(provider != 'password' AND password_hash IS NULL)",
-            name="provider_password_logic"
+            name="provider_password_logic",
         ),
     )
 
@@ -224,9 +231,13 @@ class Pregunta(Base):
     activa = Column(Boolean, default=True)
     generada_por_ia = Column(Boolean, default=False)
     prompt_contexto = Column(Text)
-    # Columnas adaptativas nuevas
+    # Columnas adaptativas
     categorias_error_objetivo = Column(JSONB, default=list)
-    sesion_origen_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="SET NULL"), nullable=True)
+    sesion_origen_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     contexto_adaptativo = Column(JSONB, nullable=True)
     fecha_creacion = Column(DateTime, default=func.now())
     creada_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
@@ -234,7 +245,7 @@ class Pregunta(Base):
     __table_args__ = (
         CheckConstraint(
             "tipo IN ('live_coding', 'teoria', 'debugging', 'arquitectura', 'optimizacion')",
-            name="preguntas_tipo_check"
+            name="preguntas_tipo_check",
         ),
         Index("idx_preguntas_tecnologia", "tecnologia_id"),
     )
@@ -244,11 +255,13 @@ class Pregunta(Base):
     nivel = relationship("NivelDificultad", back_populates="preguntas")
     creador = relationship("Usuario", back_populates="preguntas_creadas")
     sesiones = relationship(
-        "SesionEntrevista", back_populates="pregunta",
-        foreign_keys="SesionEntrevista.pregunta_id"
+        "SesionEntrevista",
+        back_populates="pregunta",
+        foreign_keys="SesionEntrevista.pregunta_id",
     )
     sesion_origen = relationship(
-        "SesionEntrevista", foreign_keys=[sesion_origen_id]
+        "SesionEntrevista",
+        foreign_keys=[sesion_origen_id],
     )
 
 
@@ -269,7 +282,7 @@ class SesionEntrevista(Base):
     sesion_anterior_id = Column(
         UUID(as_uuid=True),
         ForeignKey("sesiones_entrevista.id", ondelete="SET NULL"),
-        nullable=True
+        nullable=True,
     )
     fecha_inicio = Column(DateTime, default=func.now())
     fecha_fin = Column(DateTime, nullable=True)
@@ -281,7 +294,7 @@ class SesionEntrevista(Base):
     __table_args__ = (
         CheckConstraint(
             "estado IN ('en_progreso', 'completada', 'abandonada', 'tiempo_agotado')",
-            name="sesiones_entrevista_estado_check"
+            name="sesiones_entrevista_estado_check",
         ),
         Index("idx_sesiones_usuario", "usuario_id"),
         Index("idx_sesiones_estado", "estado"),
@@ -293,19 +306,44 @@ class SesionEntrevista(Base):
     tecnologia = relationship("Tecnologia", back_populates="sesiones")
     nivel = relationship("NivelDificultad", back_populates="sesiones")
     pregunta = relationship(
-        "Pregunta", back_populates="sesiones",
-        foreign_keys=[pregunta_id]
+        "Pregunta",
+        back_populates="sesiones",
+        foreign_keys=[pregunta_id],
     )
     sesion_anterior = relationship(
-        "SesionEntrevista", remote_side="SesionEntrevista.id",
-        foreign_keys=[sesion_anterior_id]
+        "SesionEntrevista",
+        remote_side="SesionEntrevista.id",
+        foreign_keys=[sesion_anterior_id],
     )
-    mensajes = relationship("Mensaje", back_populates="sesion", cascade="all, delete-orphan")
-    envios = relationship("EnvioCodigo", back_populates="sesion", cascade="all, delete-orphan")
-    ejecuciones = relationship("EjecucionIDE", back_populates="sesion", cascade="all, delete-orphan")
-    evaluacion = relationship("Evaluacion", back_populates="sesion", uselist=False, cascade="all, delete-orphan")
+    mensajes = relationship(
+        "Mensaje",
+        back_populates="sesion",
+        cascade="all, delete-orphan",
+        order_by="Mensaje.fecha",
+    )
+    envios = relationship(
+        "EnvioCodigo",
+        back_populates="sesion",
+        cascade="all, delete-orphan",
+        order_by="EnvioCodigo.version",
+    )
+    ejecuciones = relationship(
+        "EjecucionIDE",
+        back_populates="sesion",
+        cascade="all, delete-orphan",
+    )
+    evaluacion = relationship(
+        "Evaluacion",
+        back_populates="sesion",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    errores_detectados = relationship(
+        "ErrorDetectado",
+        back_populates="sesion",
+        cascade="all, delete-orphan",
+    )
     contactos = relationship("ContactoReclutamiento", back_populates="sesion_entrevista")
-    errores_detectados = relationship("ErrorDetectado", back_populates="sesion", cascade="all, delete-orphan")
 
 
 # =========================
@@ -315,7 +353,11 @@ class Mensaje(Base):
     __tablename__ = "mensajes"
 
     id = Column(BigInteger, primary_key=True)
-    sesion_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"), nullable=False)
+    sesion_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     rol = Column(String(10), nullable=False)  # user | assistant | system
     contenido = Column(Text, nullable=False)
     tokens_usados = Column(Integer, nullable=True)
@@ -336,7 +378,11 @@ class EnvioCodigo(Base):
     __tablename__ = "envios_codigo"
 
     id = Column(BigInteger, primary_key=True)
-    sesion_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"), nullable=False)
+    sesion_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     lenguaje = Column(String(50), nullable=False)
     codigo = Column(Text, nullable=False)
     es_envio_final = Column(Boolean, default=False)
@@ -357,7 +403,11 @@ class EjecucionIDE(Base):
 
     id = Column(BigInteger, primary_key=True)
     sesion_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id"), nullable=False)
-    envio_codigo_id = Column(BigInteger, ForeignKey("envios_codigo.id", ondelete="SET NULL"), nullable=True)
+    envio_codigo_id = Column(
+        BigInteger,
+        ForeignKey("envios_codigo.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     kubernetes_job_name = Column(String(200))
     kubernetes_namespace = Column(String(100))
     estado = Column(String(30), default="pending")  # pending | running | success | failed
@@ -382,9 +432,13 @@ class Evaluacion(Base):
     __tablename__ = "evaluaciones"
 
     id = Column(Integer, primary_key=True)
-    sesion_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"), unique=True, nullable=False)
+    sesion_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
     puntaje_total = Column(Numeric(5, 2), nullable=True)
-    # Desglose técnico avanzado
     puntaje_javascript = Column(Numeric(5, 2), nullable=True)
     puntaje_arquitectura = Column(Numeric(5, 2), nullable=True)
     puntaje_buenas_practicas = Column(Numeric(5, 2), nullable=True)
@@ -406,7 +460,7 @@ class Evaluacion(Base):
     __table_args__ = (
         CheckConstraint(
             "nivel_candidato IN ('descartado', 'revisar', 'promisorio', 'recomendado', 'destacado')",
-            name="evaluaciones_nivel_candidato_check"
+            name="evaluaciones_nivel_candidato_check",
         ),
         Index("idx_eval_nivel_candidato", "nivel_candidato"),
         Index("idx_eval_apto", "apto_para_contratacion"),
@@ -414,8 +468,17 @@ class Evaluacion(Base):
 
     # Relaciones
     sesion = relationship("SesionEntrevista", back_populates="evaluacion")
-    detalles = relationship("DetalleEvaluacion", back_populates="evaluacion", cascade="all, delete-orphan")
-    recomendaciones = relationship("RecomendacionSolucion", back_populates="evaluacion", cascade="all, delete-orphan")
+    detalles = relationship(
+        "DetalleEvaluacion",
+        back_populates="evaluacion",
+        cascade="all, delete-orphan",
+    )
+    recomendaciones = relationship(
+        "RecomendacionSolucion",
+        back_populates="evaluacion",
+        cascade="all, delete-orphan",
+        order_by="RecomendacionSolucion.orden",
+    )
 
 
 # =========================
@@ -425,7 +488,11 @@ class DetalleEvaluacion(Base):
     __tablename__ = "detalle_evaluacion"
 
     id = Column(Integer, primary_key=True)
-    evaluacion_id = Column(Integer, ForeignKey("evaluaciones.id", ondelete="CASCADE"), nullable=False)
+    evaluacion_id = Column(
+        Integer,
+        ForeignKey("evaluaciones.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     rubrica_id = Column(Integer, ForeignKey("rubricas.id"), nullable=False)
     puntaje = Column(Numeric(5, 2), nullable=False)
     comentario = Column(Text, nullable=True)
@@ -446,8 +513,16 @@ class ErrorDetectado(Base):
     __tablename__ = "errores_detectados"
 
     id = Column(BigInteger, primary_key=True)
-    sesion_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"), nullable=False)
-    envio_codigo_id = Column(BigInteger, ForeignKey("envios_codigo.id", ondelete="SET NULL"), nullable=True)
+    sesion_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    envio_codigo_id = Column(
+        BigInteger,
+        ForeignKey("envios_codigo.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     categoria_error_id = Column(Integer, ForeignKey("categorias_error.id"), nullable=False)
     descripcion = Column(Text, nullable=False)
     severidad = Column(String(20), nullable=False, default="medio")
@@ -462,7 +537,7 @@ class ErrorDetectado(Base):
     __table_args__ = (
         CheckConstraint(
             "severidad IN ('bajo', 'medio', 'alto', 'critico')",
-            name="errores_detectados_severidad_check"
+            name="errores_detectados_severidad_check",
         ),
         Index("idx_errores_sesion", "sesion_id"),
         Index("idx_errores_categoria", "categoria_error_id"),
@@ -482,20 +557,34 @@ class RecomendacionSolucion(Base):
     __tablename__ = "recomendaciones_solucion"
 
     id = Column(Integer, primary_key=True)
-    evaluacion_id = Column(Integer, ForeignKey("evaluaciones.id", ondelete="CASCADE"), nullable=False)
+    evaluacion_id = Column(
+        Integer,
+        ForeignKey("evaluaciones.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     tipo = Column(String(20), nullable=False)  # codigo | concepto | recurso | patron
     titulo = Column(String(200), nullable=False)
     descripcion = Column(Text, nullable=False)
     codigo_ejemplo = Column(Text, nullable=True)
     recurso_url = Column(String(500), nullable=True)
     recurso_titulo = Column(String(200), nullable=True)
-    categoria_error_id = Column(Integer, ForeignKey("categorias_error.id", ondelete="SET NULL"), nullable=True)
+    categoria_error_id = Column(
+        Integer,
+        ForeignKey("categorias_error.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     prioridad = Column(String(10), nullable=False, default="media")  # alta | media | baja
     orden = Column(Integer, default=0)
 
     __table_args__ = (
-        CheckConstraint("tipo IN ('codigo', 'concepto', 'recurso', 'patron')", name="recomendaciones_tipo_check"),
-        CheckConstraint("prioridad IN ('alta', 'media', 'baja')", name="recomendaciones_prioridad_check"),
+        CheckConstraint(
+            "tipo IN ('codigo', 'concepto', 'recurso', 'patron')",
+            name="recomendaciones_tipo_check",
+        ),
+        CheckConstraint(
+            "prioridad IN ('alta', 'media', 'baja')",
+            name="recomendaciones_prioridad_check",
+        ),
         Index("idx_recomendaciones_evaluacion", "evaluacion_id"),
     )
 
@@ -511,7 +600,12 @@ class EstadisticasUsuario(Base):
     __tablename__ = "estadisticas_usuario"
 
     id = Column(Integer, primary_key=True)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), unique=True, nullable=False)
+    usuario_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
     total_entrevistas = Column(Integer, default=0)
     entrevistas_finalizadas = Column(Integer, default=0)
     entrevistas_abandonadas = Column(Integer, default=0)
@@ -519,7 +613,11 @@ class EstadisticasUsuario(Base):
     mejor_puntaje = Column(Numeric(5, 2), nullable=True)
     peor_puntaje = Column(Numeric(5, 2), nullable=True)
     tiempo_promedio_segundos = Column(Integer, nullable=True)
-    tecnologia_favorita_id = Column(Integer, ForeignKey("tecnologias.id", ondelete="SET NULL"), nullable=True)
+    tecnologia_favorita_id = Column(
+        Integer,
+        ForeignKey("tecnologias.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     racha_actual = Column(Integer, default=0)
     racha_maxima = Column(Integer, default=0)
     ultima_entrevista_fecha = Column(DateTime, nullable=True)
@@ -528,8 +626,9 @@ class EstadisticasUsuario(Base):
     # Relaciones
     usuario = relationship("Usuario", back_populates="estadisticas")
     tecnologia_favorita = relationship(
-        "Tecnologia", back_populates="estadisticas_tecnologia_favorita",
-        foreign_keys=[tecnologia_favorita_id]
+        "Tecnologia",
+        back_populates="estadisticas_tecnologia_favorita",
+        foreign_keys=[tecnologia_favorita_id],
     )
 
 
@@ -540,7 +639,12 @@ class PerfilTecnicoUsuario(Base):
     __tablename__ = "perfil_tecnico_usuario"
 
     id = Column(Integer, primary_key=True)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), unique=True, nullable=False)
+    usuario_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
     score_global = Column(Numeric(5, 2), default=0)
     score_javascript = Column(Numeric(5, 2), default=0)
     score_arquitectura = Column(Numeric(5, 2), default=0)
@@ -554,15 +658,27 @@ class PerfilTecnicoUsuario(Base):
     total_sesiones = Column(Integer, default=0)
     sesiones_completadas = Column(Integer, default=0)
     sesiones_abandonadas = Column(Integer, default=0)
-    mejor_tecnologia_id = Column(Integer, ForeignKey("tecnologias.id", ondelete="SET NULL"), nullable=True)
-    peor_tecnologia_id = Column(Integer, ForeignKey("tecnologias.id", ondelete="SET NULL"), nullable=True)
-    ultima_evaluacion_id = Column(Integer, ForeignKey("evaluaciones.id", ondelete="SET NULL"), nullable=True)
+    mejor_tecnologia_id = Column(
+        Integer,
+        ForeignKey("tecnologias.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    peor_tecnologia_id = Column(
+        Integer,
+        ForeignKey("tecnologias.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    ultima_evaluacion_id = Column(
+        Integer,
+        ForeignKey("evaluaciones.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     actualizado_en = Column(DateTime, default=func.now())
 
     __table_args__ = (
         CheckConstraint(
             "nivel_actual IN ('descartado', 'revisar', 'promisorio', 'recomendado', 'destacado')",
-            name="perfil_nivel_actual_check"
+            name="perfil_nivel_actual_check",
         ),
         Index("idx_perfil_usuario", "usuario_id"),
         Index("idx_perfil_score_global", "score_global"),
@@ -572,16 +688,26 @@ class PerfilTecnicoUsuario(Base):
     # Relaciones
     usuario = relationship("Usuario", back_populates="perfil_tecnico")
     mejor_tecnologia = relationship(
-        "Tecnologia", back_populates="perfil_mejor_tecnologia",
-        foreign_keys=[mejor_tecnologia_id]
+        "Tecnologia",
+        back_populates="perfil_mejor_tecnologia",
+        foreign_keys=[mejor_tecnologia_id],
     )
     peor_tecnologia = relationship(
-        "Tecnologia", back_populates="perfil_peor_tecnologia",
-        foreign_keys=[peor_tecnologia_id]
+        "Tecnologia",
+        back_populates="perfil_peor_tecnologia",
+        foreign_keys=[peor_tecnologia_id],
     )
     ultima_evaluacion = relationship("Evaluacion", foreign_keys=[ultima_evaluacion_id])
-    fortalezas = relationship("FortalezaUsuario", back_populates="perfil", cascade="all, delete-orphan")
-    debilidades = relationship("DebilidadUsuario", back_populates="perfil", cascade="all, delete-orphan")
+    fortalezas = relationship(
+        "FortalezaUsuario",
+        back_populates="perfil",
+        cascade="all, delete-orphan",
+    )
+    debilidades = relationship(
+        "DebilidadUsuario",
+        back_populates="perfil",
+        cascade="all, delete-orphan",
+    )
 
 
 # =========================
@@ -591,7 +717,11 @@ class FortalezaUsuario(Base):
     __tablename__ = "fortalezas_usuario"
 
     id = Column(Integer, primary_key=True)
-    perfil_id = Column(Integer, ForeignKey("perfil_tecnico_usuario.id", ondelete="CASCADE"), nullable=False)
+    perfil_id = Column(
+        Integer,
+        ForeignKey("perfil_tecnico_usuario.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     categoria_error_id = Column(Integer, ForeignKey("categorias_error.id"), nullable=False)
     descripcion = Column(String(200), nullable=True)
     veces_demostrada = Column(Integer, default=1)
@@ -613,7 +743,11 @@ class DebilidadUsuario(Base):
     __tablename__ = "debilidades_usuario"
 
     id = Column(Integer, primary_key=True)
-    perfil_id = Column(Integer, ForeignKey("perfil_tecnico_usuario.id", ondelete="CASCADE"), nullable=False)
+    perfil_id = Column(
+        Integer,
+        ForeignKey("perfil_tecnico_usuario.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     categoria_error_id = Column(Integer, ForeignKey("categorias_error.id"), nullable=False)
     descripcion = Column(String(200), nullable=True)
     veces_fallada = Column(Integer, default=1)
@@ -639,8 +773,16 @@ class ContactoReclutamiento(Base):
 
     id = Column(Integer, primary_key=True)
     admin_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
-    developer_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
-    sesion_entrevista_id = Column(UUID(as_uuid=True), ForeignKey("sesiones_entrevista.id", ondelete="SET NULL"), nullable=True)
+    developer_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sesion_entrevista_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("sesiones_entrevista.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     asunto = Column(String(300), nullable=False)
     mensaje = Column(Text, nullable=False)
     estado = Column(String(30), default="enviado")  # enviado | leido | respondido
@@ -660,7 +802,11 @@ class Notificacion(Base):
     __tablename__ = "notificaciones"
 
     id = Column(BigInteger, primary_key=True)
-    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    usuario_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     tipo = Column(String(50), nullable=False)
     titulo = Column(String(200), nullable=False)
     mensaje = Column(Text, nullable=True)

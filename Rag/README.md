@@ -113,3 +113,33 @@ Rag/
     └── data/
         ├── vue_context.txt       # ✅ sin cambios
         └── next_context.txt      # ✅ sin cambios
+
+
+
+
+app/
+│
+├── api/
+│   ├── deps.py
+│   ├── endpoints.py
+│   └── reportes.py              ← 🟢 NUEVO
+│
+├── core/
+│   ├── config.py
+│   └── prompts.py
+│
+├── db/
+│   ├── database.py
+│   ├── models.py               ← 🟡 MODIFICAR FUERTE
+│   ├── repositories.py         ← 🟡 DEJAR CRUD BÁSICO
+│   └── reportes_repository.py  ← 🟢 NUEVO
+│
+├── schemas/
+│   ├── evaluations.py
+│   ├── reportes.py             ← 🟢 NUEVO
+│   └── usuarios.py             ← opcional
+│
+├── services/
+│   ├── llm_service.py
+│   ├── reporte_service.py      ← 🟢 NUEVO
+│   └── analytics_service.py    ← 🟢 NUEVO

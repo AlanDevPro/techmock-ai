@@ -390,19 +390,50 @@ async def get_sesion_por_id(db: AsyncSession, sesion_id: uuid.UUID) -> Optional[
     return result.scalar_one_or_none()
 
 
+# =============================================================
+# 🔹 SESIONES DE ENTREVISTA - VERSIÓN CORREGIDA
+# =============================================================
+
 async def get_sesion_con_detalles(db: AsyncSession, sesion_id: uuid.UUID) -> Optional[SesionEntrevista]:
-    """Obtiene sesión con todas sus relaciones cargadas."""
-    result = await db.execute(select(SesionEntrevista).where(SesionEntrevista.id == sesion_id))
-    sesion = result.scalar_one_or_none()
-    if sesion:
-        await db.refresh(
-            sesion,
-            attribute_names=[
-                "usuario", "tecnologia", "nivel", "pregunta",
-                "mensajes", "envios", "evaluacion", "errores_detectados"
-            ],
+    """
+    Obtiene sesión con todas sus relaciones cargadas eager.
+    
+    IMPORTANTE: Esta función precarga TODAS las relaciones necesarias
+    para evitar MissingGreenlet en contexto asíncrono:
+    - usuario, tecnologia, nivel, pregunta
+    - mensajes, envios
+    - evaluacion (con recomendaciones y detalles de rúbrica)
+    - errores_detectados (con categoria_error)
+    """
+    from sqlalchemy.orm import selectinload
+    from app.db.models import ErrorDetectado, Evaluacion, DetalleEvaluacion
+    
+    result = await db.execute(
+        select(SesionEntrevista)
+        .options(
+            # Datos básicos del usuario
+            selectinload(SesionEntrevista.usuario),
+            
+            # Contexto de la entrevista
+            selectinload(SesionEntrevista.tecnologia),
+            selectinload(SesionEntrevista.nivel),
+            selectinload(SesionEntrevista.pregunta),
+            
+            # Conversación y código
+            selectinload(SesionEntrevista.mensajes),
+            selectinload(SesionEntrevista.envios),
+            
+            # Evaluación con todas sus relaciones anidadas
+            selectinload(SesionEntrevista.evaluacion).selectinload(Evaluacion.recomendaciones),
+            selectinload(SesionEntrevista.evaluacion).selectinload(Evaluacion.detalles).selectinload(DetalleEvaluacion.rubrica),
+            
+            # 🔥 CRÍTICO: Errores con su categoría (evita MissingGreenlet)
+            selectinload(SesionEntrevista.errores_detectados).selectinload(ErrorDetectado.categoria_error),
         )
-    return sesion
+        .where(SesionEntrevista.id == sesion_id)
+    )
+    return result.scalar_one_or_none()
+
 
 
 async def get_sesiones_usuario(
@@ -418,6 +449,10 @@ async def get_sesiones_usuario(
     query = query.order_by(SesionEntrevista.fecha_inicio.desc()).limit(limit).offset(offset)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+
+
 
 
 async def finalizar_sesion(

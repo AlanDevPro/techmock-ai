@@ -7,9 +7,10 @@ print("📦 Importando base de datos...")
 from app.db.database import init_db, close_db
 print("✅ Base de datos importada")
 
-print("📦 Importando router...")
+print("📦 Importando routers...")
 from app.api.endpoints import router as api_router
-print("✅ Router importado correctamente")
+from app.api.reportes import router as reportes_router
+print("✅ Routers importados correctamente")
 
 
 # ---------------------------------------------------
@@ -80,13 +81,19 @@ print("✅ CORS configurado")
 # ---------------------------------------------------
 print("📦 Incluyendo routers...")
 
+# Router principal de evaluación
 app.include_router(api_router, prefix="/api/v1")
 
-print("✅ Router incluido correctamente")
+# Router de reportes y analytics
+app.include_router(reportes_router, prefix="/api/v1")
+
+print("✅ Routers incluidos correctamente")
+print("   - /api/v1 (evaluación y análisis de código)")
+print("   - /api/v1/reportes (reportes y estadísticas)")
 
 
 # ---------------------------------------------------
-# 🔹 ENDPOINTS
+# 🔹 ENDPOINTS PÚBLICOS
 # ---------------------------------------------------
 @app.get("/")
 async def read_root():
@@ -100,6 +107,11 @@ async def read_root():
         "docs": "/docs",
         "version": "1.0.0",
         "status": "online",
+        "endpoints": {
+            "evaluacion": "/api/v1/generar-preguntas/{vue|next}",
+            "analisis": "/api/v1/analizar-codigo",
+            "reportes": "/api/v1/reportes/{sesion|usuario|estadisticas}"
+        }
     }
 
 
@@ -111,4 +123,5 @@ async def health():
         "status": "ok",
         "service": "TechMock RAG",
         "version": "1.0.0",
+        "timestamp": "2026-05-18T10:00:00Z"  # Se puede dinamizar con datetime.now()
     }

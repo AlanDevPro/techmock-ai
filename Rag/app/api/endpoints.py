@@ -1,304 +1,56 @@
+"""
+Endpoints de evaluación de código y preguntas técnicas.
+Organizado por responsabilidades claras.
+"""
+
 import uuid
-import os
 from fastapi import APIRouter, HTTPException, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
 from app.api.deps import get_db
+from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
+from app.services.analytics_service import AnalyticsService
 from app.db import repositories as repo
 
-print("📦 Importando llm_service...")
-from app.services.llm_service import generar_evaluacion_llm, analizar_codigo_llm
-print("✅ llm_service importado")
+# Módulos internos de normalización
+from app.core.normalizers import (
+    normalizar_resultado_llm,
+    construir_contexto_proyecto,
+    leer_archivo_interno
+)
 
-print("📦 Creando router...")
+# Configuración
+from app.core.config import settings
+
 router = APIRouter()
-print("✅ Router creado")
+analytics_service = AnalyticsService()
 
-# -----------------------------
-# 🔹 ARCHIVOS DE CONTEXTO
-# -----------------------------
-print("📦 Configurando rutas de archivos...")
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VUE_FILE  = os.path.join(BASE_DIR, "data", "vue_context.txt")
-NEXT_FILE = os.path.join(BASE_DIR, "data", "next_context.txt")
-print("✅ Rutas configuradas")
-
-TECH_SLUGS = {
-    "Vue.js":  "vuejs",
-    "Next.js": "nextjs",
-}
-NIVEL_DEFAULT = "Intermedio"
-
-IMPACTOS_VALIDOS    = {"alto", "medio", "bajo"}
-PRIORIDADES_VALIDAS = {"alta", "media", "baja"}
-NIVELES_VALIDOS     = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"}
+# Constantes
+TECH_SLUGS = settings.TECH_SLUGS
+NIVEL_DEFAULT = settings.NIVEL_DEFAULT
 
 
 # =============================================================
-# 🧹 NORMALIZADORES — capa sanitizadora entre LLM y frontend
+# 🔹 FUNCIÓN AUXILIAR
 # =============================================================
 
-def normalizar_recomendaciones(recs) -> list:
-    if not isinstance(recs, list):
-        return []
-    resultado = []
-    for r in recs:
-        if not isinstance(r, dict):
-            continue
-        prioridad = r.get("prioridad", "media")
-        if prioridad not in PRIORIDADES_VALIDAS:
-            prioridad = "media"
-        solucion = (
-            r.get("solucion")
-            or r.get("solución")
-            or r.get("fix")
-            or r.get("corrección")
-            or ""
-        )
-        resultado.append({
-            "mensaje":   r.get("mensaje") or r.get("descripcion") or r.get("message") or "",
-            "solucion":  solucion,
-            "prioridad": prioridad,
-        })
-    return resultado
+def _puntaje_a_nivel_texto(puntaje: float) -> str:
+    """Convierte puntaje numérico a nivel textual para el frontend"""
+    if puntaje >= 90:
+        return "Excelente"
+    if puntaje >= 75:
+        return "Bueno"
+    if puntaje >= 60:
+        return "Regular"
+    if puntaje >= 40:
+        return "Deficiente"
+    return "Crítico"
 
 
-def normalizar_errores(errores) -> list:
-    if not isinstance(errores, list):
-        return []
-    resultado = []
-    for e in errores:
-        if not isinstance(e, dict):
-            continue
-        impacto = e.get("impacto", "medio")
-        if impacto not in IMPACTOS_VALIDOS:
-            impacto = "medio"
-        resultado.append({
-            "tipo":             e.get("tipo") or e.get("type") or "general",
-            "descripcion":      e.get("descripcion") or e.get("descripción") or e.get("description") or "",
-            "impacto":          impacto,
-            "linea_aproximada": e.get("linea_aproximada") or e.get("linea") or e.get("line") or None,
-        })
-    return resultado
-
-
-def normalizar_calificacion(cal) -> dict:
-    if not isinstance(cal, dict):
-        return {"nivel": "Regular", "puntaje": 50, "resumen": "Sin resumen disponible."}
-    nivel = cal.get("nivel", "Regular")
-    if nivel not in NIVELES_VALIDOS:
-        nivel = "Regular"
-    try:
-        puntaje = int(cal.get("puntaje", 50))
-        puntaje = max(0, min(100, puntaje))
-    except (TypeError, ValueError):
-        puntaje = 50
-    return {
-        "nivel":   nivel,
-        "puntaje": puntaje,
-        "resumen": cal.get("resumen") or cal.get("summary") or "Sin resumen disponible.",
-    }
-
-
-def normalizar_evaluacion_tecnica(ev) -> dict:
-    default = "No evaluado."
-    if not isinstance(ev, dict):
-        return {
-            "manejo_estado": default,
-            "legibilidad":   default,
-            "arquitectura":  default,
-            "performance":   default,
-        }
-    return {
-        "manejo_estado": ev.get("manejo_estado") or ev.get("estado")     or default,
-        "legibilidad":   ev.get("legibilidad")   or ev.get("claridad")   or default,
-        "arquitectura":  ev.get("arquitectura")                           or default,
-        "performance":   ev.get("performance")   or ev.get("rendimiento") or default,
-    }
-
-
-def normalizar_lista_strings(valor) -> list:
-    if not isinstance(valor, list):
-        return []
-    return [str(item) for item in valor if item]
-
-
-def normalizar_resultado_llm(resultado: dict) -> dict:
-    print("🧠 Respuesta RAW LLM:", resultado)
-    return {
-        "calificacion_general": normalizar_calificacion(resultado.get("calificacion_general")),
-        "errores":              normalizar_errores(resultado.get("errores", [])),
-        "buenas_practicas":     normalizar_lista_strings(resultado.get("buenas_practicas", [])),
-        "malas_practicas":      normalizar_lista_strings(resultado.get("malas_practicas", [])),
-        "recomendaciones":      normalizar_recomendaciones(resultado.get("recomendaciones", [])),
-        "evaluacion_tecnica":   normalizar_evaluacion_tecnica(resultado.get("evaluacion_tecnica")),
-    }
-
-
-# -----------------------------
-# 🔧 HELPERS DE CONTEXTO
-# -----------------------------
-
-def leer_archivo_interno(ruta: str) -> str:
-    print(f"📖 Leyendo archivo: {ruta}")
-    try:
-        with open(ruta, "r", encoding="utf-8") as f:
-            contenido = f.read()
-            print("✅ Archivo leído correctamente")
-            return contenido
-    except FileNotFoundError:
-        print("⚠️ Archivo no encontrado")
-        return "No existe conocimiento técnico indexado sobre este framework."
-
-
-def _extraer_proyecto_raiz(active_file: str) -> str:
-    """
-    Extrae el directorio raíz del proyecto a partir del archivo activo.
-    Ejemplo: '/practica-vue/src/App.vue' → 'practica-vue'
-    """
-    if not active_file:
-        return ""
-    # Normalizar separadores y limpiar slash inicial
-    partes = active_file.replace("\\", "/").lstrip("/").split("/")
-    return partes[0] if partes else ""
-
-
-def _construir_contexto_proyecto(
-    active_file: str,
-    files: dict,
-    framework: str,
-) -> str:
-    """
-    Construye un contexto textual del proyecto activo para que el LLM
-    entienda la arquitectura, imports y composición.
-
-    ✅ FILTRA por proyecto raíz del archivo activo para evitar mezclar
-    practica-vue con practica-nextjs u otros proyectos del workspace.
-    """
-
-    # ================================================================
-    # 🔍 DEBUG: DIAGNÓSTICO DE ENTRADA A _construir_contexto_proyecto
-    # ================================================================
-    print("\n" + "="*80)
-    print("📂 _construir_contexto_proyecto — DIAGNÓSTICO DE CONTEXTO")
-    print("="*80)
-    print(f"📌 Framework declarado : {framework}")
-    print(f"📌 Archivo activo      : {active_file or '(ninguno)'}")
-    print(f"📌 Total archivos recibidos del frontend: {len(files)}")
-
-    if not files:
-        print("⚠️  files está VACÍO — el contexto será vacío string")
-        print("="*80 + "\n")
-        return ""
-
-    # ── Listar TODOS los archivos que llegaron del frontend ──────────
-    print("\n📋 TODOS LOS ARCHIVOS RECIBIDOS:")
-    for i, ruta in enumerate(sorted(files.keys()), 1):
-        tamanio = len(files[ruta]) if files[ruta] else 0
-        print(f"  {i:>2}. {ruta}  ({tamanio} chars)")
-
-    # ── Detectar proyectos únicos presentes ─────────────────────────
-    proyectos_presentes = set()
-    for ruta in files:
-        raiz = ruta.replace("\\", "/").lstrip("/").split("/")[0]
-        if raiz:
-            proyectos_presentes.add(raiz)
-
-    print(f"\n🗂️  PROYECTOS DETECTADOS EN files: {sorted(proyectos_presentes)}")
-
-    # ── Extraer y validar proyecto raíz del archivo activo ──────────
-    proyecto_root = _extraer_proyecto_raiz(active_file)
-    print(f"📁 PROYECTO RAÍZ DETECTADO (desde active_file): '{proyecto_root}'")
-
-    if not proyecto_root:
-        print("⚠️  No se pudo detectar proyecto raíz — se incluirán TODOS los archivos (riesgo de mezcla)")
-    else:
-        print(f"✅ Se filtrarán archivos que NO pertenezcan a: '{proyecto_root}'")
-
-    # ── Filtrar archivos por proyecto raíz ──────────────────────────
-    if proyecto_root:
-        archivos_filtrados = {
-            ruta: contenido
-            for ruta, contenido in files.items()
-            if ruta.replace("\\", "/").lstrip("/").startswith(proyecto_root)
-        }
-        archivos_excluidos = [
-            ruta for ruta in files
-            if ruta not in archivos_filtrados
-        ]
-    else:
-        archivos_filtrados = dict(files)
-        archivos_excluidos = []
-
-    print(f"\n✅ ARCHIVOS INCLUIDOS TRAS FILTRO ({len(archivos_filtrados)}):")
-    for i, ruta in enumerate(sorted(archivos_filtrados.keys()), 1):
-        tamanio = len(archivos_filtrados[ruta]) if archivos_filtrados[ruta] else 0
-        print(f"  {i:>2}. {ruta}  ({tamanio} chars)")
-
-    if archivos_excluidos:
-        print(f"\n🚫 ARCHIVOS EXCLUIDOS POR FILTRO DE PROYECTO ({len(archivos_excluidos)}):")
-        for ruta in sorted(archivos_excluidos):
-            print(f"       - {ruta}")
-    else:
-        print("\n✅ Sin archivos excluidos (todos pertenecen al mismo proyecto raíz)")
-
-    # ── Selección y truncamiento ─────────────────────────────────────
-    MAX_FILES          = 8
-    MAX_CHARS_PER_FILE = 800
-
-    prioridad     = [active_file] + [k for k in archivos_filtrados if k != active_file]
-    seleccionados = prioridad[:MAX_FILES]
-
-    print(f"\n📦 ARCHIVOS SELECCIONADOS PARA EL CONTEXTO (máx {MAX_FILES}):")
-    for i, ruta in enumerate(seleccionados, 1):
-        contenido  = archivos_filtrados.get(ruta, "")
-        chars_orig = len(contenido)
-        chars_env  = min(chars_orig, MAX_CHARS_PER_FILE)
-        truncado   = "⚠️ TRUNCADO" if chars_orig > MAX_CHARS_PER_FILE else "✅ completo"
-        print(f"  {i}. {ruta}")
-        print(f"     chars originales: {chars_orig} → chars enviados: {chars_env}  [{truncado}]")
-
-    chars_totales_contexto = sum(
-        min(len(archivos_filtrados.get(r, "")), MAX_CHARS_PER_FILE)
-        for r in seleccionados
-    )
-    print(f"\n📊 TAMAÑO ESTIMADO DEL CONTEXTO FINAL: ~{chars_totales_contexto} chars")
-
-    if len(archivos_filtrados) > MAX_FILES:
-        omitidos = list(archivos_filtrados.keys())[MAX_FILES:]
-        print(f"\n⚠️  ARCHIVOS OMITIDOS POR LÍMITE DE {MAX_FILES} (no entran al contexto):")
-        for ruta in omitidos:
-            print(f"       - {ruta}")
-
-    print("="*80 + "\n")
-    # ================================================================
-
-    # ── Construcción del string de contexto ─────────────────────────
-    lineas = [
-        f"=== Estructura del proyecto ({framework}) ===",
-        f"Proyecto raíz : {proyecto_root or 'desconocido'}",
-        f"Archivo activo: {active_file}",
-        "",
-    ]
-
-    for ruta in seleccionados:
-        contenido = archivos_filtrados.get(ruta, "")
-        if not contenido:
-            continue
-        preview = contenido[:MAX_CHARS_PER_FILE]
-        if len(contenido) > MAX_CHARS_PER_FILE:
-            preview += "\n... (truncado)"
-        lineas.append(f"--- {ruta} ---")
-        lineas.append(preview)
-        lineas.append("")
-
-    return "\n".join(lineas)
-
-
-# -----------------------------
-# 🔹 ENDPOINTS DE PREGUNTAS
-# -----------------------------
+# =============================================================
+# 🎯 ENDPOINTS DE PREGUNTAS
+# =============================================================
 
 @router.get("/generar-preguntas/vue", response_model=RespuestaEvaluacion)
 async def generar_preguntas_vue_get(
@@ -306,8 +58,9 @@ async def generar_preguntas_vue_get(
     usuario_id: str = None,
     db: AsyncSession = Depends(get_db),
 ):
+    """Genera preguntas de evaluación para Vue.js"""
     print("👉 Endpoint Vue llamado")
-    contexto  = leer_archivo_interno(VUE_FILE)
+    contexto = leer_archivo_interno(settings.VUE_FILE)
     resultado = await generar_evaluacion_llm(contexto, "Vue.js")
 
     sesion = await _persistir_pregunta_y_sesion(
@@ -331,8 +84,9 @@ async def generar_preguntas_next_get(
     usuario_id: str = None,
     db: AsyncSession = Depends(get_db),
 ):
+    """Genera preguntas de evaluación para Next.js"""
     print("👉 Endpoint Next llamado")
-    contexto  = leer_archivo_interno(NEXT_FILE)
+    contexto = leer_archivo_interno(settings.NEXT_FILE)
     resultado = await generar_evaluacion_llm(contexto, "Next.js")
 
     sesion = await _persistir_pregunta_y_sesion(
@@ -350,9 +104,9 @@ async def generar_preguntas_next_get(
     return resultado
 
 
-# -----------------------------
+# =============================================================
 # 🔥 ENDPOINT ANALIZAR CÓDIGO PRO
-# -----------------------------
+# =============================================================
 
 @router.post("/analizar-codigo", response_model=RespuestaAnalisisCodigo)
 async def analizar_codigo(
@@ -360,60 +114,37 @@ async def analizar_codigo(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    """Analiza código enviado por el usuario con contexto multi-archivo"""
     print("👉 Endpoint analizar código llamado")
 
-    codigo         = data.get("codigo", "").strip()
-    framework      = data.get("framework", "general").strip()
-    sesion_id_str  = data.get("sesion_id")
+    codigo = data.get("codigo", "").strip()
+    framework = data.get("framework", "general").strip()
+    sesion_id_str = data.get("sesion_id")
     usuario_id_str = data.get("usuario_id")
-    active_file    = data.get("active_file", "")
-    files          = data.get("files", {})
+    active_file = data.get("active_file", "")
+    files = data.get("files", {})
 
-    # ================================================================
-    # 🔍 DEBUG: PAYLOAD RECIBIDO DEL FRONTEND
-    # ================================================================
-    print("\n" + "="*80)
-    print("📥 PAYLOAD RECIBIDO EN /analizar-codigo")
-    print("="*80)
-    print(f"  framework      : {framework}")
-    print(f"  active_file    : {active_file or '(vacío)'}")
-    print(f"  sesion_id      : {sesion_id_str or '(sin sesión)'}")
-    print(f"  usuario_id     : {usuario_id_str or '(sin usuario)'}")
-    print(f"  len(codigo)    : {len(codigo)} chars")
-    print(f"  len(files)     : {len(files)} archivos")
-    print(f"  files keys     : {sorted(files.keys()) if files else '[]'}")
-    print("="*80 + "\n")
-    # ================================================================
-
+    # Validaciones
     if not codigo:
-        print("❌ Código vacío")
         raise HTTPException(
             status_code=400,
             detail="El campo 'codigo' es requerido y no puede estar vacío.",
         )
 
-    if len(codigo) > 10_000:
-        print("❌ Código demasiado largo")
+    if len(codigo) > settings.MAX_CODIGO_LENGTH:
         raise HTTPException(
             status_code=413,
-            detail="El código excede el límite de 10,000 caracteres.",
+            detail=f"El código excede el límite de {settings.MAX_CODIGO_LENGTH} caracteres.",
         )
 
-    contexto_proyecto = _construir_contexto_proyecto(
+    # Construir contexto del proyecto
+    contexto_proyecto = construir_contexto_proyecto(
         active_file=active_file,
         files=files,
         framework=framework,
     )
 
-    # ── Resumen post-construcción ────────────────────────────────────
-    print("\n" + "-"*60)
-    print("📊 RESUMEN CONTEXTO CONSTRUIDO")
-    print("-"*60)
-    print(f"  Tamaño contexto_proyecto : {len(contexto_proyecto)} chars")
-    print(f"  Contexto vacío           : {'SÍ ⚠️' if not contexto_proyecto else 'NO ✅'}")
-    print("-"*60 + "\n")
-
-    print("⏳ Enviando código a LLM con contexto multi-archivo...")
+    # Analizar con LLM
     resultado_raw = await analizar_codigo_llm(
         codigo=codigo,
         framework=framework,
@@ -422,6 +153,7 @@ async def analizar_codigo(
 
     resultado = normalizar_resultado_llm(resultado_raw)
 
+    # Persistir si hay sesión
     if sesion_id_str:
         await _persistir_analisis_codigo(
             db=db,
@@ -434,20 +166,27 @@ async def analizar_codigo(
     return resultado
 
 
-# ✅ Obtener resultado de sesión
+# =============================================================
+# 📊 ENDPOINTS DE CONSULTA
+# =============================================================
+
 @router.get("/sesion/{sesion_id}/resultado")
 async def obtener_resultado_sesion(
     sesion_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    print(f"👉 Consultando resultado de sesión: {sesion_id}")
+    """
+    Obtiene el resultado completo de una sesión (formato ORM).
+    Útil para debugging, admin panel o uso interno.
+    """
+    print(f"👉 Consultando resultado de sesión (ORM): {sesion_id}")
 
     try:
         sesion_uuid = uuid.UUID(sesion_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="sesion_id inválido")
 
-    sesion = await repo.get_sesion_completa(db, sesion_uuid)
+    sesion = await repo.get_sesion_con_detalles(db, sesion_uuid)
 
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
@@ -455,32 +194,138 @@ async def obtener_resultado_sesion(
     return sesion
 
 
-# ✅ Guardar borrador (autosave)
+# ✅ NUEVO ENDPOINT PROFESIONAL - Formato específico para frontend
+@router.get("/sesion/{sesion_id}/analisis", response_model=RespuestaAnalisisCodigo)
+async def obtener_analisis_sesion(
+    sesion_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Obtiene el análisis de código en el formato específico que espera el frontend.
+    Este es el endpoint que DEBE usar el frontend.
+    
+    Ventajas:
+    - Contrato estable entre backend y frontend
+    - Transformación centralizada (si cambia la BD, solo cambia aquí)
+    - Frontend recibe exactamente lo que necesita
+    """
+    print(f"👉 Obteniendo análisis formateado para frontend: {sesion_id}")
+    
+    try:
+        sesion_uuid = uuid.UUID(sesion_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="sesion_id inválido")
+    
+    # Obtener la sesión con todos sus datos
+    sesion = await repo.get_sesion_con_detalles(db, sesion_uuid)
+    
+    if not sesion:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
+    # Transformar los datos de BD al formato que espera el frontend
+    evaluacion = sesion.evaluacion
+    
+    # Mapear nivel de puntaje a categoría
+    puntaje = evaluacion.puntaje_total if evaluacion else 0
+    nivel = _puntaje_a_nivel_texto(puntaje)
+    
+    # Construir errores en el formato esperado
+    errores = []
+    for error in (sesion.errores_detectados or []):
+        errores.append({
+            "tipo": error.categoria_error.nombre if error.categoria_error else "general",
+            "descripcion": error.descripcion,
+            "impacto": error.severidad,
+            "linea_aproximada": error.linea_codigo,
+        })
+    
+    # Construir recomendaciones
+    recomendaciones = []
+    if evaluacion and evaluacion.recomendaciones:
+        for rec in evaluacion.recomendaciones:
+            recomendaciones.append({
+                "mensaje": rec.titulo,
+                "solucion": rec.descripcion,
+                "prioridad": rec.prioridad,
+            })
+    
+    # Parsear fortalezas y áreas de mejora (son strings con saltos de línea)
+    fortalezas = evaluacion.fortalezas.split("\n") if evaluacion and evaluacion.fortalezas else []
+    areas_mejora = evaluacion.areas_mejora.split("\n") if evaluacion and evaluacion.areas_mejora else []
+    
+    # Filtrar líneas vacías
+    fortalezas = [f.strip() for f in fortalezas if f and f.strip()]
+    areas_mejora = [a.strip() for a in areas_mejora if a and a.strip()]
+    
+    # Evaluación técnica (podría venir de detalles de rúbrica)
+    evaluacion_tecnica = {
+        "manejo_estado": "No evaluado",
+        "legibilidad": "No evaluado", 
+        "arquitectura": "No evaluado",
+        "performance": "No evaluado",
+    }
+    
+    # Intentar extraer de detalles de rúbrica
+    if evaluacion and evaluacion.detalles:
+        for detalle in evaluacion.detalles:
+            if detalle.rubrica:
+                rubrica_nombre = detalle.rubrica.nombre.lower()
+                comentario = detalle.comentario or "Evaluado"
+                
+                if "estado" in rubrica_nombre or "state" in rubrica_nombre:
+                    evaluacion_tecnica["manejo_estado"] = comentario
+                elif "legibilidad" in rubrica_nombre or "legibility" in rubrica_nombre:
+                    evaluacion_tecnica["legibilidad"] = comentario
+                elif "arquitectura" in rubrica_nombre or "architecture" in rubrica_nombre:
+                    evaluacion_tecnica["arquitectura"] = comentario
+                elif "performance" in rubrica_nombre or "rendimiento" in rubrica_nombre:
+                    evaluacion_tecnica["performance"] = comentario
+    
+    return {
+        "calificacion_general": {
+            "nivel": nivel,
+            "puntaje": int(puntaje) if puntaje else 0,
+            "resumen": evaluacion.feedback_general if evaluacion else "Sin evaluación",
+        },
+        "errores": errores,
+        "buenas_practicas": fortalezas,
+        "malas_practicas": areas_mejora,
+        "recomendaciones": recomendaciones,
+        "evaluacion_tecnica": evaluacion_tecnica,
+    }
+
+
+# =============================================================
+# 💾 ENDPOINTS DE AUTOSAVE
+# =============================================================
+
 @router.post("/guardar-borrador")
 async def guardar_borrador(
     data: dict,
     db: AsyncSession = Depends(get_db),
 ):
+    """Guarda un borrador de código (autosave)"""
     sesion_id_str = data.get("sesion_id")
-    codigo        = data.get("codigo", "").strip()
-    active_file   = data.get("active_file", "")
+    codigo = data.get("codigo", "").strip()
+    active_file = data.get("active_file", "")
 
     if not sesion_id_str or not codigo:
         raise HTTPException(status_code=400, detail="sesion_id y codigo son requeridos")
 
     try:
         sesion_id = uuid.UUID(sesion_id_str)
-        sesion    = await repo.get_sesion_por_id(db, sesion_id)
+        sesion = await repo.get_sesion_por_id(db, sesion_id)
 
         if not sesion:
             print(f"⚠️ Sesión {sesion_id} no encontrada para autosave")
             return {"ok": False, "detail": "Sesión no encontrada"}
 
-        await repo.guardar_borrador_codigo(
+        await repo.guardar_envio_codigo(
             db=db,
             sesion_id=sesion_id,
+            lenguaje=active_file or "autosave",
             codigo=codigo,
-            active_file=active_file,
+            es_envio_final=False,
         )
 
         print(f"💾 Borrador guardado para sesión {sesion_id}")
@@ -492,7 +337,7 @@ async def guardar_borrador(
 
 
 # =============================================================
-# 🔧 HELPERS DE PERSISTENCIA
+# 🔧 HELPERS DE PERSISTENCIA (PRIVADOS)
 # =============================================================
 
 async def _persistir_pregunta_y_sesion(
@@ -503,6 +348,7 @@ async def _persistir_pregunta_y_sesion(
     usuario_id: str | None,
     request: Request,
 ):
+    """Persiste la pregunta generada y crea la sesión"""
     sesion = None
 
     try:
@@ -512,14 +358,14 @@ async def _persistir_pregunta_y_sesion(
             return None
 
         tecnologia = await repo.get_tecnologia_por_slug(db, slug)
-        nivel      = await repo.get_nivel_por_nombre(db, NIVEL_DEFAULT)
+        nivel = await repo.get_nivel_por_nombre(db, NIVEL_DEFAULT)
 
         if not tecnologia or not nivel:
             print(f"⚠️ Tecnología '{slug}' o nivel '{NIVEL_DEFAULT}' no encontrados en BD")
             return None
 
         enunciado = resultado.get("pregunta_practica", "Sin enunciado")
-        titulo    = enunciado[:100] if enunciado else f"Pregunta {framework}"
+        titulo = enunciado[:100] if enunciado else f"Pregunta {framework}"
 
         pregunta = await repo.crear_pregunta(
             db=db,
@@ -532,7 +378,7 @@ async def _persistir_pregunta_y_sesion(
         )
 
         if usuario_id:
-            ip         = request.client.host if request.client else None
+            ip = request.client.host if request.client else None
             user_agent = request.headers.get("user-agent")
 
             sesion = await repo.crear_sesion(
@@ -560,14 +406,16 @@ async def _persistir_analisis_codigo(
     framework: str,
     resultado: dict,
 ) -> None:
+    """Persiste el análisis de código en la base de datos"""
     try:
         sesion_id = uuid.UUID(sesion_id_str)
-
         sesion = await repo.get_sesion_por_id(db, sesion_id)
+        
         if not sesion:
             print(f"⚠️ Sesión {sesion_id} no encontrada, no se guarda el análisis")
             return
 
+        # Guardar el código enviado
         await repo.guardar_envio_codigo(
             db=db,
             sesion_id=sesion_id,
@@ -576,71 +424,76 @@ async def _persistir_analisis_codigo(
             es_envio_final=True,
         )
 
-        cal     = resultado.get("calificacion_general", {})
+        # Guardar evaluación
+        cal = resultado.get("calificacion_general", {})
         puntaje = cal.get("puntaje", 0)
         resumen = cal.get("resumen", "Sin resumen")
-
         buenas = resultado.get("buenas_practicas", [])
-        malas  = resultado.get("malas_practicas", [])
+        malas = resultado.get("malas_practicas", [])
 
-        await repo.guardar_evaluacion(
+        evaluacion = await repo.guardar_evaluacion(
             db=db,
             sesion_id=sesion_id,
             puntaje_total=float(puntaje),
             feedback_general=resumen,
             fortalezas="\n".join(buenas) if buenas else None,
             areas_mejora="\n".join(malas) if malas else None,
-            modelo_ia_usado="qwen2.5-coder:1.5b",
+            modelo_ia_usado=settings.DEFAULT_LLM_MODEL,
         )
 
+        # Guardar errores detectados
         errores = resultado.get("errores", [])
-
         for error in errores:
-            await repo.crear_error_detectado(
-                db=db,
-                sesion_id=sesion_id,
-                tipo=error.get("tipo"),
-                descripcion=error.get("descripcion"),
-                impacto=error.get("impacto"),
-                linea_aproximada=error.get("linea_aproximada"),
-            )
-
+            try:
+                # Validar que linea_codigo sea entero o None
+                linea_raw = error.get("linea_aproximada")
+                if linea_raw is not None:
+                    try:
+                        linea_codigo_val = int(linea_raw) if str(linea_raw).isdigit() else None
+                    except (ValueError, TypeError):
+                        linea_codigo_val = None
+                else:
+                    linea_codigo_val = None
+                
+                await repo.guardar_error_detectado(
+                    db=db,
+                    sesion_id=sesion_id,
+                    categoria_error_id=1,
+                    descripcion=error.get("descripcion", "Sin descripción"),
+                    severidad=error.get("impacto", "medio"),
+                    linea_codigo=linea_codigo_val,
+                )
+            except Exception as e_err:
+                print(f"⚠️ Error guardando error detectado: {e_err}")
+        
+        # Guardar recomendaciones
         recomendaciones = resultado.get("recomendaciones", [])
-
         for rec in recomendaciones:
-            await repo.crear_recomendacion_solucion(
-                db=db,
-                sesion_id=sesion_id,
-                mensaje=rec.get("mensaje"),
-                solucion=rec.get("solucion"),
-                prioridad=rec.get("prioridad"),
-            )
+            try:
+                await repo.guardar_recomendacion(
+                    db=db,
+                    evaluacion_id=evaluacion.id,
+                    tipo="mejora",
+                    titulo=rec.get("mensaje", "Recomendación"),
+                    descripcion=rec.get("solucion", ""),
+                    prioridad=rec.get("prioridad", "media"),
+                )
+            except Exception as e_rec:
+                print(f"⚠️ Error guardando recomendación: {e_rec}")
 
+        # Guardar evaluación técnica detallada
         evaluacion_tecnica = resultado.get("evaluacion_tecnica", {})
-
-        await repo.crear_detalle_evaluacion(
-            db=db,
-            sesion_id=sesion_id,
-            manejo_estado=evaluacion_tecnica.get("manejo_estado"),
-            legibilidad=evaluacion_tecnica.get("legibilidad"),
-            arquitectura=evaluacion_tecnica.get("arquitectura"),
-            performance=evaluacion_tecnica.get("performance"),
-        )
-
-        if sesion.usuario_id:
-            await repo.actualizar_estadisticas_usuario(
-                db=db,
-                usuario_id=sesion.usuario_id,
-                puntaje=puntaje,
-            )
-        if sesion.usuario_id:
-            await repo.actualizar_perfil_tecnico(
-                db=db,
-                usuario_id=sesion.usuario_id,
-                evaluacion_tecnica=evaluacion_tecnica,
+        if evaluacion_tecnica:
+            await analytics_service.guardar_evaluacion_tecnica(
+                db, evaluacion.id, evaluacion_tecnica
             )
 
-        await repo.finalizar_sesion(db=db, sesion_id=sesion_id)
+        # Actualizar estadísticas del usuario
+        if sesion.usuario_id:
+            await repo.actualizar_estadisticas_usuario(db, sesion.usuario_id)
+            await repo.actualizar_perfil_tecnico(db, sesion.usuario_id)
+
+        await repo.finalizar_sesion(db, sesion_id)
 
         print(f"✅ Análisis de código persistido para sesión {sesion_id}")
 

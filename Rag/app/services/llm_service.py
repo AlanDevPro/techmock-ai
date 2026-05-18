@@ -1,39 +1,27 @@
-print("🔥 1 - inicio archivo")
+# app/services/llm_service.py
+"""
+Responsabilidad única: comunicación con el modelo LLM (Ollama).
+NO accede a BD. NO contiene lógica de negocio. NO importa schemas de reportes.
+"""
 
 import json
 import re
 
-print("🔥 2 - json/re OK")
-
 from langchain_community.chat_models import ChatOllama
-print("🔥 3 - ChatOllama importado")
-
 from langchain_core.messages import SystemMessage, HumanMessage
-print("🔥 4 - messages importado")
 
-from app.schemas.evaluations import RespuestaEvaluacion, RespuestaAnalisisCodigo
 from app.core.prompts import get_junior_prompt
 
-print("🔥 5 - imports completos")
 
+# ================================================================
+# 🔹 CONSTANTES
+# ================================================================
 
+NIVELES_VALIDOS    = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"}
+IMPACTOS_VALIDOS   = {"alto", "medio", "bajo"}
+PRIORIDADES_VALIDAS = {"alta", "media", "baja"}
 
-# -----------------------------
-# 🔹 GENERAR PREGUNTAS
-# -----------------------------
-async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
-    print("🔥 6 - dentro de generar_evaluacion_llm")
-
-    llm = ChatOllama(
-        model="qwen2.5-coder:1.5b",
-        format="json",
-        temperature=0.1,
-        num_predict=500,
-        num_ctx=1536
-    )
-    print("🔥 7 - ChatOllama creado en generar_evaluacion_llm")
-
-    esquema = """
+_ESQUEMA_EVALUACION = """
 {
   "pregunta_practica": "string",
   "comprension_a_evaluar": "string",
@@ -42,70 +30,7 @@ async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
 }
 """
 
-    system_prompt = get_junior_prompt(framework)
-
-    prompt_completo = f"""
-{system_prompt}
-
-⚠ Responde SOLO en JSON válido.
-NO agregues texto fuera del JSON.
-
-Formato obligatorio:
-{esquema}
-"""
-
-    messages = [
-        SystemMessage(content=prompt_completo),
-        HumanMessage(content=f"Contexto técnico:\n{contexto[:1500]}")
-    ]
-    print("🔥 8 - messages preparados, antes de llm.ainvoke")
-
-    try:
-        
-        respuesta = await llm.ainvoke(messages)
-        print("🔥 9 - llm.ainvoke completado")
-        data = _safe_json_load(respuesta.content)
-
-        return {
-            "pregunta_practica": data.get("pregunta_practica", ""),
-            "comprension_a_evaluar": data.get("comprension_a_evaluar", ""),
-            "explicacion_codigo_esperado": data.get("explicacion_codigo_esperado", ""),
-            "error_por_falta_de_contexto": data.get("error_por_falta_de_contexto", "")
-        }
-
-    except Exception as e:
-        print("❌ ERROR GENERANDO PREGUNTAS:", e)
-        return {
-            "pregunta_practica": "",
-            "comprension_a_evaluar": "",
-            "explicacion_codigo_esperado": "",
-            "error_por_falta_de_contexto": f"Error JSON: {str(e)}",
-        }
-
-
-# -----------------------------
-# 🔥 ANALIZAR CÓDIGO (PRO FEEDBACK)
-# -----------------------------
-async def analizar_codigo_llm(
-    codigo: str,
-    framework: str,
-    contexto_proyecto: str = "",
-) -> dict:
-
-    print("🔥 10 - dentro de analizar_codigo_llm")
-    print("⚡ Iniciando análisis profesional de código...")
-
-    llm = ChatOllama(
-        model="qwen2.5-coder:1.5b",
-        format="json",
-        temperature=0.1,
-        num_predict=800,
-        num_ctx=4096
-    )
-
-    print("🔥 11 - ChatOllama creado en analizar_codigo_llm")
-
-    esquema = """
+_ESQUEMA_ANALISIS = """
 {
   "calificacion_general": {
     "nivel": "Excelente | Bueno | Regular | Deficiente | Crítico",
@@ -138,237 +63,145 @@ async def analizar_codigo_llm(
 }
 """
 
-    prompt = f"""
-Eres un ingeniero senior con 10+ años de experiencia en revisión de código frontend.
 
-Tu objetivo es dar un feedback profesional, constructivo y accionable.
+# ================================================================
+# 🔹 GENERAR PREGUNTA DE ENTREVISTA
+# ================================================================
 
-Analiza el código {framework} enviado por el usuario considerando también
-el contexto completo del proyecto, arquitectura, imports, composición de componentes
-y relación entre archivos.
+async def generar_evaluacion_llm(contexto: str, framework: str) -> dict:
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=500,
+        num_ctx=1536,
+    )
 
-Responde ÚNICAMENTE en JSON válido.
-
-⚠ REGLAS CRÍTICAS:
-
-1. calificacion_general.nivel DEBE ser uno de:
-   "Excelente", "Bueno", "Regular", "Deficiente", "Crítico"
-
-2. calificacion_general.puntaje DEBE ser un entero de 0 a 100
-
-3. errores → lista de objetos:
-   tipo, descripcion, impacto, linea_aproximada
-
-4. buenas_practicas → SOLO strings
-
-5. malas_practicas → SOLO strings
-
-6. recomendaciones → lista de objetos:
-   mensaje, solucion, prioridad
-
-7. evaluacion_tecnica → objeto:
-   manejo_estado, legibilidad, arquitectura, performance
-
-ESCALA:
-- 90-100 → Excelente
-- 70-89  → Bueno
-- 50-69  → Regular
-- 30-49  → Deficiente
-- 0-29   → Crítico
-
-Formato obligatorio:
-{esquema}
-"""
-
-    codigo_recortado = codigo[:2500]
-
-    contexto_recortado = contexto_proyecto[:4000] if contexto_proyecto else ""
-
-    human_content = f"""
-=== CÓDIGO PRINCIPAL ===
-
-{codigo_recortado}
-"""
-
-    if contexto_recortado:
-        human_content += f"""
-
-=== CONTEXTO DEL PROYECTO ===
-
-{contexto_recortado}
-"""
+    system_prompt = get_junior_prompt(framework)
+    prompt_completo = (
+        f"{system_prompt}\n\n"
+        "⚠ Responde SOLO en JSON válido. "
+        "NO agregues texto fuera del JSON.\n\n"
+        f"Formato obligatorio:\n{_ESQUEMA_EVALUACION}"
+    )
 
     messages = [
-        SystemMessage(content=prompt),
-        HumanMessage(content=human_content)
+        SystemMessage(content=prompt_completo),
+        HumanMessage(content=f"Contexto técnico:\n{contexto[:1500]}"),
     ]
-
-    print("🔥 12 - messages preparados en analizar_codigo_llm")
-
-    # ================================================================
-    # 🧠 DEBUG: VER EXACTAMENTE QUÉ RECIBE EL LLM
-    # ================================================================
-    print("\n" + "="*80)
-    print("🧠 PROMPT FINAL ENVIADO AL LLM")
-    print("="*80)
-
-    print("\n📌 SYSTEM PROMPT:\n")
-    print(prompt[:3000])
-
-    print("\n📌 HUMAN CONTENT:\n")
-    print(human_content[:8000])
-
-    print("\n📌 TAMAÑO CÓDIGO:", len(codigo))
-    print("📌 TAMAÑO CÓDIGO RECORTADO:", len(codigo_recortado))
-
-    print("📌 TAMAÑO CONTEXTO:", len(contexto_proyecto))
-    print("📌 TAMAÑO CONTEXTO RECORTADO:", len(contexto_recortado))
-
-    # ----------------------------------------------------------------
-    # 🔍 DETECCIÓN DE FRAMEWORK EN CÓDIGO Y CONTEXTO
-    # ----------------------------------------------------------------
-    print("\n" + "-"*60)
-    print("🔍 DIAGNÓSTICO DE FRAMEWORK Y DIRECTORIOS")
-    print("-"*60)
-
-    # Detectar framework real en el código
-    framework_detectado = []
-    if "<template>" in codigo or "defineComponent" in codigo or "ref(" in codigo or "vue" in codigo.lower():
-        framework_detectado.append("Vue")
-    if "next/" in codigo or "getServerSideProps" in codigo or "getStaticProps" in codigo or "next" in codigo.lower():
-        framework_detectado.append("Next.js")
-    if "react" in codigo.lower() or "useState" in codigo or "useEffect" in codigo or "jsx" in codigo.lower():
-        framework_detectado.append("React")
-
-    print(f"📌 FRAMEWORK DECLARADO (parámetro): {framework}")
-    print(f"📌 FRAMEWORK DETECTADO EN CÓDIGO:   {framework_detectado if framework_detectado else ['No detectado claramente']}")
-
-    # Detectar directorios en el contexto
-    directorios_detectados = []
-    if contexto_recortado:
-        if "practica-vue" in contexto_recortado or "practica_vue" in contexto_recortado:
-            directorios_detectados.append("practica-vue")
-        if "practica-nextjs" in contexto_recortado or "practica_nextjs" in contexto_recortado or "next.js" in contexto_recortado.lower():
-            directorios_detectados.append("practica-nextjs")
-
-    print(f"📌 DIRECTORIOS DETECTADOS EN CONTEXTO: {directorios_detectados if directorios_detectados else ['Ninguno detectado / contexto vacío']}")
-    print(f"📌 CONTEXTO VACÍO: {'SÍ ⚠️' if not contexto_recortado else 'NO ✅'}")
-
-    # Primeras líneas del código para identificar qué archivo es
-    primeras_lineas_codigo = "\n".join(codigo.splitlines()[:8])
-    print(f"\n📌 PRIMERAS 8 LÍNEAS DEL CÓDIGO ANALIZADO:\n{primeras_lineas_codigo}")
-
-    # Primeras líneas del contexto para ver qué archivos entran
-    if contexto_recortado:
-        primeras_lineas_contexto = "\n".join(contexto_recortado.splitlines()[:15])
-        print(f"\n📌 PRIMERAS 15 LÍNEAS DEL CONTEXTO:\n{primeras_lineas_contexto}")
-    else:
-        print("\n⚠️  CONTEXTO VACÍO - El LLM analizará sin contexto de proyecto")
-
-    print("-"*60 + "\n")
-    print("="*80 + "\n")
-    # ================================================================
 
     try:
         respuesta = await llm.ainvoke(messages)
-
-        print("🔥 13 - llm.ainvoke completado en analizar_codigo_llm")
-
-        print("🧠 RAW LLM:", respuesta.content[:300])
-
         data = _safe_json_load(respuesta.content)
-
-        return _construir_respuesta_analisis(data)
-
+        return {
+            "pregunta_practica":          data.get("pregunta_practica", ""),
+            "comprension_a_evaluar":      data.get("comprension_a_evaluar", ""),
+            "explicacion_codigo_esperado": data.get("explicacion_codigo_esperado", ""),
+            "error_por_falta_de_contexto": data.get("error_por_falta_de_contexto", ""),
+        }
     except Exception as e:
-        print("❌ ERROR EN ANÁLISIS PRO:", e)
+        return {
+            "pregunta_practica":          "",
+            "comprension_a_evaluar":      "",
+            "explicacion_codigo_esperado": "",
+            "error_por_falta_de_contexto": f"Error LLM: {str(e)}",
+        }
 
+
+# ================================================================
+# 🔹 ANALIZAR CÓDIGO
+# ================================================================
+
+async def analizar_codigo_llm(
+    codigo: str,
+    framework: str,
+    contexto_proyecto: str = "",
+) -> dict:
+    llm = ChatOllama(
+        model="qwen2.5-coder:1.5b",
+        format="json",
+        temperature=0.1,
+        num_predict=800,
+        num_ctx=4096,
+    )
+
+    prompt = (
+        f"Eres un ingeniero senior con 10+ años de experiencia en revisión de código frontend.\n\n"
+        f"Analiza el código {framework} considerando arquitectura, imports y composición de componentes.\n\n"
+        "Responde ÚNICAMENTE en JSON válido.\n\n"
+        "⚠ REGLAS:\n"
+        "1. nivel: 'Excelente'|'Bueno'|'Regular'|'Deficiente'|'Crítico'\n"
+        "2. puntaje: entero 0-100\n"
+        "3. errores → lista: tipo, descripcion, impacto, linea_aproximada\n"
+        "4. buenas_practicas / malas_practicas → solo strings\n"
+        "5. recomendaciones → lista: mensaje, solucion, prioridad\n"
+        "6. evaluacion_tecnica → manejo_estado, legibilidad, arquitectura, performance\n\n"
+        "ESCALA: 90-100 Excelente | 70-89 Bueno | 50-69 Regular | 30-49 Deficiente | 0-29 Crítico\n\n"
+        f"Formato:\n{_ESQUEMA_ANALISIS}"
+    )
+
+    human_content = f"=== CÓDIGO PRINCIPAL ===\n\n{codigo[:2500]}"
+    if contexto_proyecto:
+        human_content += f"\n\n=== CONTEXTO DEL PROYECTO ===\n\n{contexto_proyecto[:4000]}"
+
+    messages = [
+        SystemMessage(content=prompt),
+        HumanMessage(content=human_content),
+    ]
+
+    try:
+        respuesta = await llm.ainvoke(messages)
+        data = _safe_json_load(respuesta.content)
+        return _construir_respuesta_analisis(data)
+    except Exception as e:
         return _respuesta_error_analisis(str(e))
 
 
-# -----------------------------
-# 🧠 CONSTRUCCIÓN RESPUESTA PRO
-# -----------------------------
+# ================================================================
+# 🔹 CONSTRUCCIÓN Y NORMALIZACIÓN (privado al módulo)
+# ================================================================
 
 def _construir_respuesta_analisis(data: dict) -> dict:
-    """Construye y normaliza la respuesta completa del análisis pro."""
-    print("🔥 14 - dentro de _construir_respuesta_analisis")
-
     cal = data.get("calificacion_general", {})
-
     return {
         "calificacion_general": {
-            "nivel": _normalizar_nivel(cal.get("nivel", "Regular")),
+            "nivel":   _normalizar_nivel(cal.get("nivel", "Regular")),
             "puntaje": _normalizar_puntaje(cal.get("puntaje", 50)),
-            "resumen": cal.get("resumen", "No se pudo generar un resumen.")
+            "resumen": cal.get("resumen", "No se pudo generar un resumen."),
         },
-        "errores": _normalizar_errores_pro(data.get("errores")),
-        "buenas_practicas": _asegurar_lista_strings(data.get("buenas_practicas")),
-        "malas_practicas": _asegurar_lista_strings(data.get("malas_practicas")),
-        "recomendaciones": _normalizar_recomendaciones_pro(data.get("recomendaciones")),
-        "evaluacion_tecnica": _normalizar_evaluacion_tecnica(data.get("evaluacion_tecnica"))
+        "errores":           _normalizar_errores(data.get("errores")),
+        "buenas_practicas":  _asegurar_lista_strings(data.get("buenas_practicas")),
+        "malas_practicas":   _asegurar_lista_strings(data.get("malas_practicas")),
+        "recomendaciones":   _normalizar_recomendaciones(data.get("recomendaciones")),
+        "evaluacion_tecnica": _normalizar_evaluacion_tecnica(data.get("evaluacion_tecnica")),
     }
 
 
 def _respuesta_error_analisis(error: str) -> dict:
-    """Respuesta de fallback cuando hay un error interno."""
-    print("🔥 15 - dentro de _respuesta_error_analisis")
     return {
         "calificacion_general": {
-            "nivel": "Crítico",
-            "puntaje": 0,
-            "resumen": "No fue posible analizar el código. Verifica que sea código válido e intenta nuevamente."
+            "nivel": "Crítico", "puntaje": 0,
+            "resumen": "No fue posible analizar el código. Verifica que sea código válido e intenta nuevamente.",
         },
-        "errores": [
-            {
-                "tipo": "Sistema",
-                "descripcion": f"Error interno del analizador: {error}",
-                "impacto": "alto",
-                "linea_aproximada": None
-            }
-        ],
+        "errores": [{"tipo": "Sistema", "descripcion": f"Error interno: {error}", "impacto": "alto", "linea_aproximada": None}],
         "buenas_practicas": [],
-        "malas_practicas": [],
-        "recomendaciones": [
-            {
-                "mensaje": "El código no pudo ser procesado.",
-                "solucion": "Asegúrate de enviar código válido y legible.",
-                "prioridad": "alta"
-            }
-        ],
-        "evaluacion_tecnica": {
-            "manejo_estado": "No evaluado",
-            "legibilidad": "No evaluado",
-            "arquitectura": "No evaluado",
-            "performance": "No evaluado"
-        }
+        "malas_practicas":  [],
+        "recomendaciones":  [{"mensaje": "El código no pudo ser procesado.", "solucion": "Envía código válido y legible.", "prioridad": "alta"}],
+        "evaluacion_tecnica": {"manejo_estado": "No evaluado", "legibilidad": "No evaluado", "arquitectura": "No evaluado", "performance": "No evaluado"},
     }
-
-
-# -----------------------------
-# 🧠 UTILIDADES DE NORMALIZACIÓN
-# -----------------------------
-
-NIVELES_VALIDOS = {"Excelente", "Bueno", "Regular", "Deficiente", "Crítico"}
-IMPACTOS_VALIDOS = {"alto", "medio", "bajo"}
-PRIORIDADES_VALIDAS = {"alta", "media", "baja"}
 
 
 def _normalizar_nivel(nivel: str) -> str:
     if nivel in NIVELES_VALIDOS:
         return nivel
-    nivel_lower = nivel.lower()
-    mapa = {
-        "excellent": "Excelente", "good": "Bueno", "regular": "Regular",
-        "deficient": "Deficiente", "critical": "Crítico"
-    }
-    return mapa.get(nivel_lower, "Regular")
+    mapa = {"excellent": "Excelente", "good": "Bueno", "regular": "Regular",
+            "deficient": "Deficiente", "critical": "Crítico"}
+    return mapa.get(nivel.lower(), "Regular")
 
 
 def _normalizar_puntaje(puntaje) -> int:
     try:
-        p = int(puntaje)
-        return max(0, min(100, p))
+        return max(0, min(100, int(puntaje)))
     except (ValueError, TypeError):
         return 50
 
@@ -388,66 +221,44 @@ def _asegurar_lista_strings(valor) -> list:
     return result
 
 
-def _normalizar_errores_pro(lista) -> list:
-    """Normaliza la lista de errores al formato ErrorDetectado."""
+def _normalizar_errores(lista) -> list:
     if not isinstance(lista, list):
         return []
-
     resultado = []
     for item in lista:
         if isinstance(item, dict):
             impacto = item.get("impacto", "medio")
-            if impacto not in IMPACTOS_VALIDOS:
-                impacto = "medio"
             resultado.append({
-                "tipo": item.get("tipo", "General"),
-                "descripcion": item.get("descripcion", item.get("mensaje", "Error no especificado")),
-                "impacto": impacto,
-                "linea_aproximada": item.get("linea_aproximada", None)
+                "tipo":             item.get("tipo", "General"),
+                "descripcion":      item.get("descripcion", item.get("mensaje", "Error no especificado")),
+                "impacto":          impacto if impacto in IMPACTOS_VALIDOS else "medio",
+                "linea_aproximada": item.get("linea_aproximada"),
             })
         elif isinstance(item, str):
-            resultado.append({
-                "tipo": "General",
-                "descripcion": item,
-                "impacto": "medio",
-                "linea_aproximada": None
-            })
+            resultado.append({"tipo": "General", "descripcion": item, "impacto": "medio", "linea_aproximada": None})
     return resultado
 
 
-def _normalizar_recomendaciones_pro(lista) -> list:
-    """Normaliza la lista de recomendaciones al formato RecomendacionItem pro."""
+def _normalizar_recomendaciones(lista) -> list:
     if not isinstance(lista, list):
         return []
-
     resultado = []
     for item in lista:
         if isinstance(item, dict):
             prioridad = item.get("prioridad", "media")
-            if prioridad not in PRIORIDADES_VALIDAS:
-                prioridad = "media"
             resultado.append({
-                "mensaje": item.get("mensaje", "Sin mensaje"),
+                "mensaje":  item.get("mensaje", "Sin mensaje"),
                 "solucion": item.get("solucion", "Sin solución"),
-                "prioridad": prioridad
+                "prioridad": prioridad if prioridad in PRIORIDADES_VALIDAS else "media",
             })
         elif isinstance(item, str):
-            resultado.append({
-                "mensaje": item,
-                "solucion": "No especificada",
-                "prioridad": "media"
-            })
+            resultado.append({"mensaje": item, "solucion": "No especificada", "prioridad": "media"})
     return resultado
 
 
 def _normalizar_evaluacion_tecnica(data) -> dict:
-    """Garantiza que evaluacion_tecnica tenga todos sus campos."""
-    base = {
-        "manejo_estado": "No evaluado",
-        "legibilidad": "No evaluado",
-        "arquitectura": "No evaluado",
-        "performance": "No evaluado"
-    }
+    base = {"manejo_estado": "No evaluado", "legibilidad": "No evaluado",
+            "arquitectura": "No evaluado", "performance": "No evaluado"}
     if isinstance(data, dict):
         for key in base:
             if data.get(key):
@@ -465,6 +276,4 @@ def _safe_json_load(texto: str) -> dict:
                 return json.loads(match.group())
             except Exception:
                 pass
-
-    print("⚠ JSON inválido del LLM, devolviendo vacío")
     return {}
