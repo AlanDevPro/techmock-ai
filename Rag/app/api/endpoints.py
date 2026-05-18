@@ -499,3 +499,75 @@ async def _persistir_analisis_codigo(
 
     except Exception as e:
         print(f"⚠️ Error persistiendo análisis de código (no bloquea respuesta): {e}")
+
+
+# =============================================================
+# 🚀 NUEVO ENDPOINT RÁPIDO - Solo crear sesión
+# =============================================================
+
+@router.get("/iniciar-sesion/{framework}")
+async def iniciar_sesion_rapida(
+    framework: str,
+    request: Request,
+    usuario_id: str = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Crea SOLO la sesión sin generar pregunta (rápido, < 100ms).
+    El IDE luego puede generar la pregunta bajo demanda.
+    """
+    print(f"👉 Creando sesión rápida para framework: {framework}")
+    
+    # Mapear framework a slug
+    framework_map = {
+        "vuejs": "Vue.js",
+        "nextjs": "Next.js",
+    }
+    
+    framework_nombre = framework_map.get(framework.lower())
+    if not framework_nombre:
+        raise HTTPException(status_code=400, detail=f"Framework no soportado: {framework}")
+    
+    slug = TECH_SLUGS.get(framework_nombre)
+    if not slug:
+        raise HTTPException(status_code=400, detail=f"Slug no encontrado para {framework_nombre}")
+    
+    # Obtener tecnología y nivel
+    tecnologia = await repo.get_tecnologia_por_slug(db, slug)
+    nivel = await repo.get_nivel_por_nombre(db, NIVEL_DEFAULT)
+    
+    if not tecnologia or not nivel:
+        raise HTTPException(status_code=404, detail="Tecnología o nivel no encontrados")
+    
+    # Crear pregunta temporal (placeholder)
+    pregunta_placeholder = await repo.crear_pregunta(
+        db=db,
+        tecnologia_id=tecnologia.id,
+        nivel_id=nivel.id,
+        titulo="Cargando pregunta...",
+        enunciado="La pregunta se generará en el IDE",
+        prompt_contexto="",
+        creada_por=uuid.UUID(usuario_id) if usuario_id else None,
+    )
+    
+    # Crear sesión
+    ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    
+    sesion = await repo.crear_sesion(
+        db=db,
+        usuario_id=uuid.UUID(usuario_id) if usuario_id else None,
+        tecnologia_id=tecnologia.id,
+        nivel_id=nivel.id,
+        pregunta_id=pregunta_placeholder.id,
+        ip_usuario=ip,
+        user_agent=user_agent,
+    )
+    
+    print(f"✅ Sesión rápida creada con ID: {sesion.id}")
+    
+    return {
+        "sesion_id": str(sesion.id),
+        "tecnologia_id": tecnologia.id,
+        "nivel_id": nivel.id,
+    }
