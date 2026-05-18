@@ -12,6 +12,7 @@ import StatusBar from "./StatusBar";
 import TopMenuBar from "./TopMenuBar";
 import { bootWebContainer, getFileSystem, readWebContainerFiles } from "@/lib/webcontainer";
 import codeService from "@/services/codeService";
+import { env } from "@/config/env";
 
 export type Theme = "dark" | "light";
 export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
@@ -38,24 +39,18 @@ function getInitialActiveFile(framework: "vuejs" | "nextjs" | null): string {
   return "/src/App.vue";
 }
 
-// ✅ MEJORA: leer sesion_id desde URL
 function getInitialSessionId(): string | null {
   return getParam("sesion_id");
 }
 
-// ✅ MEJORA: leer usuario_id desde URL
 function getInitialUsuarioId(): string | null {
   return getParam("usuario_id");
-}
-
-// ✅ MEJORA: modo entrevista vs práctica libre
-function getInterviewMode(): boolean {
-  return getParam("mode") === "interview";
 }
 
 // ─── Componente principal ──────────────────────────────────────────────────────
 
 export default function IDE() {
+  
   const router = useRouter();
   const [theme, setTheme] = useState<Theme>("dark");
 
@@ -64,10 +59,8 @@ export default function IDE() {
     getInitialActiveFile(getInitialFramework())
   );
 
-  // ✅ MEJORAS: sesion_id, usuario_id, modo entrevista
   const [sesionId] = useState<string | null>(getInitialSessionId);
   const [usuarioId] = useState<string | null>(getInitialUsuarioId);
-  const [isInterviewMode] = useState<boolean>(getInterviewMode);
 
   const [fileSystem, setFileSystem] = useState<{ [key: string]: string }>({});
   const [isBooting, setIsBooting] = useState(true);
@@ -80,20 +73,27 @@ export default function IDE() {
   const [previewWidth, setPreviewWidth] = useState(400);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
 
-  const [isSidebarVisible, setIsSidebarVisible] = useState(!isInterviewMode);
+  // ✅ AHORA EL SIDEBAR SIEMPRE ES VISIBLE
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 
-  const [isTerminalVisible, setIsTerminalVisible] = useState(!isInterviewMode);
+  // ✅ AHORA LA TERMINAL SIEMPRE ES VISIBLE
+  const [isTerminalVisible, setIsTerminalVisible] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
   const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
 
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
 
+  console.log("🧠 [IDE INIT] Query params detectados:");
+  console.log("framework:", selectedFramework);
+  console.log("sesionId:", sesionId);
+  console.log("usuarioId:", usuarioId);
+
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // ✅ Diagnósticos derivados (sin estado extra)
+  // Diagnósticos derivados
   const diagnostics = useMemo(() => {
     const content = fileSystem[activeFile];
     if (!content) return { errors: 0, warnings: 0, infos: 0 };
@@ -113,9 +113,9 @@ export default function IDE() {
     return { errors, warnings, infos };
   }, [activeFile, fileSystem]);
 
-  const toggleTheme             = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
-  const togglePreviewVisibility = () => setIsPreviewVisible((v) => !v);
-  const toggleSidebarVisibility = () => setIsSidebarVisible((v) => !v);
+  const toggleTheme              = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const togglePreviewVisibility  = () => setIsPreviewVisible((v) => !v);
+  const toggleSidebarVisibility  = () => setIsSidebarVisible((v) => !v);
   const toggleTerminalVisibility = () => setIsTerminalVisible((v) => !v);
 
   const handleViewChange = (view: ActivityView) => {
@@ -171,13 +171,27 @@ export default function IDE() {
   // Boot WebContainer
   useEffect(() => {
     let mounted = true;
-    bootWebContainer().then(() => {
-      if (mounted) {
-        setIsBooting(false);
-        setFileSystem(getFileSystem());
-      }
-    });
-    return () => { mounted = false; };
+
+    console.log("🚀 [WEBCONTAINER] Iniciando boot...");
+
+    bootWebContainer()
+      .then(() => {
+        console.log("✅ [WEBCONTAINER] Boot exitoso");
+        const fs = getFileSystem();
+        console.log("📁 [WEBCONTAINER] FileSystem:", fs);
+        if (mounted) {
+          setIsBooting(false);
+          setFileSystem(fs);
+          console.log("✅ [WEBCONTAINER] Estado actualizado");
+        }
+      })
+      .catch((err) => {
+        console.error("❌ [WEBCONTAINER] Error fatal:", err);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -186,9 +200,9 @@ export default function IDE() {
     return () => clearTimeout(timer);
   }, [isBooting]);
 
-  // ✅ MEJORA: Autosave cada 15 segundos en modo entrevista
+  // Autosave cada 15 segundos si hay sesionId
   useEffect(() => {
-    if (!isInterviewMode || !sesionId || isBooting) return;
+    if (!sesionId || isBooting) return;
 
     const interval = setInterval(async () => {
       const codigo = fileSystem[activeFile];
@@ -207,7 +221,7 @@ export default function IDE() {
     }, 15_000);
 
     return () => clearInterval(interval);
-  }, [isInterviewMode, sesionId, isBooting, activeFile, fileSystem]);
+  }, [sesionId, isBooting, activeFile, fileSystem]);
 
   // Redimensionamiento del preview
   useEffect(() => {
@@ -298,17 +312,6 @@ export default function IDE() {
   };
 
   const handleSelectFileWithLine = (file: string, line?: number) => {
-    // ✅ MEJORA: en modo entrevista, restringir archivos fuera del ejercicio
-    if (isInterviewMode) {
-      const allowedPrefixes = selectedFramework === "vuejs"
-        ? ["/practica-vue/"]
-        : ["/practica-nextjs/"];
-      const allowed = allowedPrefixes.some((p) => file.startsWith(p));
-      if (!allowed) {
-        console.warn("🚫 Archivo fuera del ejercicio bloqueado en modo entrevista:", file);
-        return;
-      }
-    }
     setActiveFile(file);
     if (line) console.log(`Navegar a línea ${line} en el archivo ${file}`);
   };
@@ -317,15 +320,17 @@ export default function IDE() {
     handleSelectFileWithLine(file);
   };
 
-  const handleRunTests = async () => {
-    setSubmitStatus("running");
-    await new Promise((r) => setTimeout(r, 1800));
-    setSubmitStatus("success");
-    setTimeout(() => setSubmitStatus(null), 3000);
-  };
-
+  // ─── Submit Code ──────────────────────────────────────────────────────────────
   const handleSubmitCode = async () => {
-    console.log("🚀 Iniciando handleSubmitCode...");
+    console.log("🚀 [SUBMIT] Iniciando análisis");
+    console.log("📄 activeFile:", activeFile);
+    console.log("🧠 sesionId:", sesionId);
+    console.log("👤 usuarioId:", usuarioId);
+
+    if (!sesionId) {
+      console.warn("⚠️ No hay sesion_id — enviando en modo libre sin persistencia");
+    }
+
     setSubmitStatus("running");
     setSubmitMessage("Analizando código...");
 
@@ -345,13 +350,12 @@ export default function IDE() {
       setTimeout(() => setSubmitStatus(null), 3000);
       return;
     }
+    console.log("📦 código length:", codigoCompleto?.length);
 
-    // ✅ MEJORA: framework mapeado correctamente
     const frameworkApi = codeService.resolverFrameworkApi(selectedFramework);
     console.log("🎯 Framework:", selectedFramework, "→ API:", frameworkApi);
 
     try {
-      // ✅ MEJORA: enviar sesion_id, usuario_id, files, active_file
       const resultado = await codeService.analizarCodigo({
         codigo: codigoCompleto,
         framework: frameworkApi,
@@ -361,27 +365,18 @@ export default function IDE() {
         files: fileSystem,
       });
 
+      console.log("📦 resultado backend:", resultado);
+
       setSubmitStatus("success");
       setSubmitMessage("¡Análisis completado!");
 
-      // ✅ MEJORA: redirigir por sesion_id (el backend es la fuente de verdad)
-      const frontendOrigin = process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000";
-
       if (sesionId) {
-        // El frontend principal consulta el resultado desde el backend usando sesion_id
-        window.open(
-          `${frontendOrigin}/dashboard/developer/interviews/analisis/${sesionId}`,
-          "_blank"
-        );
+        console.log("➡️ REDIRECT A:", `/dashboard/developer/interviews/analisis/${sesionId}`);
+        window.location.href = `${env.FRONTEND_BASE_URL}/dashboard/developer/interviews/analisis/${sesionId}`;
       } else {
-        // Fallback: pasar resultado completo por query param (solo si no hay sesión)
-        const resultadoJson = encodeURIComponent(JSON.stringify(resultado));
-        window.open(
-          `${frontendOrigin}/dashboard/developer/interviews/analisis?analysis=${resultadoJson}`,
-          "_blank"
-        );
+        console.log("ℹ️ Sin sesion_id, no hay redirección");
+        setTimeout(() => setSubmitStatus(null), 3000);
       }
-
     } catch (error) {
       console.error("❌ Error al analizar código:", error);
       setSubmitStatus("error");
@@ -417,18 +412,13 @@ export default function IDE() {
           activeFile={activeFile}
         />
 
-        {/* ✅ MEJORA: banner de modo entrevista */}
-        {isInterviewMode && (
+        {/* Banner informativo (ya no es modo entrevista restrictivo) */}
+        {sesionId && (
           <div
             className="flex items-center justify-center px-4 text-[11px] font-semibold uppercase tracking-widest shrink-0"
-            style={{ background: "#b45309", color: "#fef3c7", height: "22px" }}
+            style={{ background: "#1a5c1a", color: "#fef3c7", height: "22px" }}
           >
-            🎯 Modo Entrevista Activo
-            {sesionId && (
-              <span className="ml-3 opacity-60 normal-case tracking-normal font-normal">
-                sesión: {sesionId.slice(0, 8)}…
-              </span>
-            )}
+            🎯 Sesión Activa: {sesionId.slice(0, 8)}…
           </div>
         )}
 
@@ -453,29 +443,39 @@ export default function IDE() {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            {[
-              // ✅ MEJORA: ocultar Sidebar y Terminal controles en modo entrevista si están deshabilitados
-              ...(!isInterviewMode
-                ? [{ label: "Sidebar",  active: isSidebarVisible,  toggle: toggleSidebarVisibility }]
-                : []),
-              { label: "Preview",  active: isPreviewVisible,  toggle: togglePreviewVisibility },
-              ...(!isInterviewMode
-                ? [{ label: "Terminal", active: isTerminalVisible, toggle: toggleTerminalVisibility }]
-                : []),
-            ].map(({ label, active, toggle }) => (
-              <span
-                key={label}
-                onClick={toggle}
-                className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
-                style={{
-                  borderColor: "var(--accent)",
-                  backgroundColor: active ? "var(--accent)" : "transparent",
-                  color: active ? "#ffffff" : "var(--accent)",
-                }}
-              >
-                {active ? `${label} ✓` : label}
-              </span>
-            ))}
+            <span
+              onClick={toggleSidebarVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{
+                borderColor: "var(--accent)",
+                backgroundColor: isSidebarVisible ? "var(--accent)" : "transparent",
+                color: isSidebarVisible ? "#ffffff" : "var(--accent)",
+              }}
+            >
+              {isSidebarVisible ? "Sidebar ✓" : "Sidebar"}
+            </span>
+            <span
+              onClick={togglePreviewVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{
+                borderColor: "var(--accent)",
+                backgroundColor: isPreviewVisible ? "var(--accent)" : "transparent",
+                color: isPreviewVisible ? "#ffffff" : "var(--accent)",
+              }}
+            >
+              {isPreviewVisible ? "Preview ✓" : "Preview"}
+            </span>
+            <span
+              onClick={toggleTerminalVisibility}
+              className="cursor-pointer px-3 py-0.5 rounded text-[11px] font-semibold border transition-colors hover:opacity-80"
+              style={{
+                borderColor: "var(--accent)",
+                backgroundColor: isTerminalVisible ? "var(--accent)" : "transparent",
+                color: isTerminalVisible ? "#ffffff" : "var(--accent)",
+              }}
+            >
+              {isTerminalVisible ? "Terminal ✓" : "Terminal"}
+            </span>
           </div>
         </div>
 
@@ -483,8 +483,8 @@ export default function IDE() {
           <LeftPanel />
           <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
 
-          {/* ✅ MEJORA: sidebar oculto en modo entrevista */}
-          {isSidebarVisible && !isInterviewMode && (
+          {/* Sidebar — SIEMPRE RENDERIZADO si isSidebarVisible es true */}
+          {isSidebarVisible && (
             <>
               <Sidebar
                 activeView={activeView}
@@ -515,7 +515,7 @@ export default function IDE() {
               className="flex-1 min-h-0 relative flex flex-row"
               style={{
                 background: "var(--bg-primary)",
-                height: isTerminalVisible && !isInterviewMode
+                height: isTerminalVisible
                   ? `calc(100% - ${terminalHeight}px)`
                   : "100%",
                 transition: isResizingTerminal ? "none" : "height 0.2s ease",
@@ -576,8 +576,8 @@ export default function IDE() {
               )}
             </div>
 
-            {/* ✅ MEJORA: terminal oculta en modo entrevista */}
-            {isTerminalVisible && !isInterviewMode && (
+            {/* Terminal — SIEMPRE RENDERIZADA si isTerminalVisible es true */}
+            {isTerminalVisible && (
               <div
                 className="cursor-ns-resize hover:bg-accent transition-colors"
                 style={{
@@ -589,7 +589,7 @@ export default function IDE() {
               />
             )}
 
-            {isTerminalVisible && !isInterviewMode && (
+            {isTerminalVisible && (
               <div
                 className="border-t flex flex-col shrink-0"
                 style={{
@@ -624,41 +624,39 @@ export default function IDE() {
               </div>
             )}
 
-            {/* Barra inferior con Submit (visible cuando terminal oculta o siempre en entrevista) */}
-            {(!isTerminalVisible || isInterviewMode) && (
-              <div
-                className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
-                style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+            {/* Barra inferior con Submit */}
+            <div
+              className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
+              style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+            >
+              {submitStatus === "running" && (
+                <span className="text-[12px] animate-pulse" style={{ color: "var(--text-secondary)" }}>
+                  {submitMessage || "Analizando código..."}
+                </span>
+              )}
+              {submitStatus === "success" && (
+                <span className="text-[12px] text-green-400 font-semibold">✓ {submitMessage || "Completado"}</span>
+              )}
+              {submitStatus === "error" && (
+                <span className="text-[12px] text-red-400 font-semibold">✗ {submitMessage || "Error al analizar"}</span>
+              )}
+
+              {/* Autosave indicator */}
+              {sesionId && submitStatus === null && (
+                <span className="text-[11px] opacity-50" style={{ color: "var(--text-secondary)" }}>
+                  💾 Autosave activo
+                </span>
+              )}
+
+              <button
+                onClick={handleSubmitCode}
+                disabled={submitStatus === "running"}
+                className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--btn-submit-bg)" }}
               >
-                {submitStatus === "running" && (
-                  <span className="text-[12px] animate-pulse" style={{ color: "var(--text-secondary)" }}>
-                    {submitMessage || "Analizando código..."}
-                  </span>
-                )}
-                {submitStatus === "success" && (
-                  <span className="text-[12px] text-green-400 font-semibold">✓ {submitMessage || "Completado"}</span>
-                )}
-                {submitStatus === "error" && (
-                  <span className="text-[12px] text-red-400 font-semibold">✗ {submitMessage || "Error al analizar"}</span>
-                )}
-
-                {/* ✅ MEJORA: autosave indicator en modo entrevista */}
-                {isInterviewMode && sesionId && submitStatus === null && (
-                  <span className="text-[11px] opacity-50" style={{ color: "var(--text-secondary)" }}>
-                    💾 Autosave activo
-                  </span>
-                )}
-
-                <button
-                  onClick={handleSubmitCode}
-                  disabled={submitStatus === "running"}
-                  className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-                  style={{ background: "var(--btn-submit-bg)" }}
-                >
-                  Submit Code
-                </button>
-              </div>
-            )}
+                Submit Code
+              </button>
+            </div>
           </div>
         </div>
 
