@@ -1,5 +1,7 @@
 // services/dashboard.service.ts
 
+import { ReactNode } from "react";
+
 import { apiFetch } from "@/services/api";
 
 // ─────────────────────────────────────────────
@@ -13,6 +15,11 @@ export interface DashboardStats {
   average_score: number;
 }
 
+export type SessionStatus =
+  | "completada"
+  | "en_progreso"
+  | "abandonada";
+
 export interface RecentSession {
   status: string;
   time: ReactNode;
@@ -25,11 +32,6 @@ export interface RecentSession {
   estado: SessionStatus;
   fecha_inicio: string;
 }
-
-export type SessionStatus =
-  | "completada"
-  | "en_progreso"
-  | "abandonada";
 
 export interface TopTech {
   nombre: string;
@@ -49,10 +51,20 @@ export interface RecentContact {
   fecha_envio: string;
 }
 
+// ─────────────────────────────────────────────
+// TIPOS DE NOTIFICACIÓN
+// ─────────────────────────────────────────────
+
+export type NotificationType =
+  | "success"
+  | "error"
+  | "warning"
+  | "info";
+
 export interface RecentNotif {
   time: ReactNode;
   msg: ReactNode;
-  type: any;
+  type: NotificationType;
   id: number;
   tipo: string;
   titulo: string;
@@ -89,7 +101,7 @@ async function safeFetch(
 ): Promise<Response> {
   try {
     return await apiFetch(endpoint, options);
-  } catch (err) {
+  } catch (err: unknown) {
     const isNetwork =
       err instanceof TypeError &&
       (err.message.includes("fetch") ||
@@ -104,7 +116,9 @@ async function safeFetch(
   }
 }
 
-async function handleResponse<T>(res: Response): Promise<T> {
+async function handleResponse<T>(
+  res: Response
+): Promise<T> {
   if (res.status === 401)
     throw new DashboardError(
       "Sesión expirada.",
@@ -139,7 +153,6 @@ async function handleResponse<T>(res: Response): Promise<T> {
 // ─────────────────────────────────────────────
 
 export const dashboardService = {
-
   async getStats(): Promise<DashboardStats> {
     const res = await safeFetch("/dashboard/stats");
 
@@ -151,7 +164,9 @@ export const dashboardService = {
     return data.data;
   },
 
-  async getRecentSessions(): Promise<RecentSession[]> {
+  async getRecentSessions(): Promise<
+    RecentSession[]
+  > {
     const res = await safeFetch(
       "/dashboard/recent-sessions"
     );
@@ -177,7 +192,9 @@ export const dashboardService = {
     return data.data;
   },
 
-  async getRecentContacts(): Promise<RecentContact[]> {
+  async getRecentContacts(): Promise<
+    RecentContact[]
+  > {
     const res = await safeFetch(
       "/dashboard/recent-recruitment"
     );
@@ -190,7 +207,9 @@ export const dashboardService = {
     return data.data;
   },
 
-  async getRecentNotifs(): Promise<RecentNotif[]> {
+  async getRecentNotifs(): Promise<
+    RecentNotif[]
+  > {
     const res = await safeFetch(
       "/dashboard/notifications"
     );

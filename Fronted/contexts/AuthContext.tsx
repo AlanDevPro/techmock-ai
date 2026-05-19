@@ -25,6 +25,37 @@ export interface AppUser {
   apellido?: string;
   rol: 'admin' | 'developer';
   providers: string[];
+  // Campos extra del perfil
+  telefono?: string;
+  bio?: string;
+  website?: string;
+  location?: string;
+  github_url?: string;
+  github?: string;
+  linkedin_url?: string;
+  twitter?: string;
+  avatar_url?: string;
+  activo?: boolean;
+  email_verificado?: boolean;
+  fecha_creacion?: string;
+  createdAt?: string;
+  ultimo_acceso?: string;
+  ultimo_login?: string;
+}
+
+// Payload que acepta updateUserProfile
+export interface UpdateProfilePayload {
+  nombre?: string;
+  apellido?: string;
+  telefono?: string;
+  bio?: string;
+  website?: string;
+  location?: string;
+  github_url?: string;
+  linkedin_url?: string;
+  twitter?: string;
+  avatar_url?: string;
+  email?: string;
 }
 
 interface AuthContextType {
@@ -39,13 +70,15 @@ interface AuthContextType {
   getLinkedProviders: () => string[];
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
+  // ✅ Nueva función agregada
+  updateUserProfile: (payload: UpdateProfilePayload) => Promise<void>;
 }
 
 // ─────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
+const API = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:4000/api/v1';
 
 function decodeJWT(token: string): Omit<AppUser, 'providers'> | null {
   try {
@@ -169,9 +202,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-
-  
-
   console.log('🔄 [AUTH PROVIDER] render → loading:', loading, '| user:', user?.email ?? null);
 
   // ── useEffect #1 — Restaurar sesión desde localStorage ──────────────────
@@ -213,16 +243,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     })
       .then((r) => {
         console.log('🔵 [AUTH #1] /me → HTTP status:', r.status, r.statusText);
-        console.log('🔵 [AUTH #1] /me → headers Content-Type:', r.headers.get('content-type'));
-
-        // Capturamos el texto crudo antes de parsear para ver si es HTML de error o JSON
         return r.text().then((text) => {
           console.log('🔵 [AUTH #1] /me → body crudo (primeros 300 chars):', text.substring(0, 300));
           try {
             const json = JSON.parse(text);
             return { status: r.status, data: json };
           } catch {
-            console.error('❌ [AUTH #1] /me → body NO es JSON válido. Probablemente CORS o 404 HTML');
+            console.error('❌ [AUTH #1] /me → body NO es JSON válido');
             return { status: r.status, data: null };
           }
         });
@@ -230,40 +257,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       .then(({ status, data }) => {
         if (!data) {
           console.error('❌ [AUTH #1] /me → Sin data parseable. Status:', status);
-          console.error('❌ [AUTH #1] POSIBLES CAUSAS: backend caído, URL incorrecta, CORS no configurado');
           clearTokens();
           return;
         }
 
         console.log('🔵 [AUTH #1] /me → data.success:', data.success);
         console.log('🔵 [AUTH #1] /me → data.user:', JSON.stringify(data.user));
-        console.log('🔵 [AUTH #1] /me → data completo:', JSON.stringify(data));
 
         if (data.success && data.user) {
           const restored: AppUser = {
             ...decoded,
-            providers: data.user.providers ?? [],
+            // Merge de campos extra que devuelve /me
+            telefono:        data.user.telefono,
+            bio:             data.user.bio,
+            website:         data.user.website,
+            location:        data.user.location,
+            github_url:      data.user.github_url,
+            linkedin_url:    data.user.linkedin_url,
+            twitter:         data.user.twitter,
+            avatar_url:      data.user.avatar_url,
+            activo:          data.user.activo,
+            email_verificado: data.user.email_verificado,
+            fecha_creacion:  data.user.fecha_creacion,
+            ultimo_acceso:   data.user.ultimo_acceso,
+            ultimo_login:    data.user.ultimo_login,
+            providers:       data.user.providers ?? [],
           };
           console.log('✅ [AUTH #1] setUser →', restored.email, '| providers:', restored.providers);
           setUser(restored);
         } else {
           console.error('❌ [AUTH #1] /me → data.success es false o data.user es null');
-          console.error('❌ [AUTH #1] Respuesta completa del backend:', JSON.stringify(data));
-          console.error('❌ [AUTH #1] POSIBLES CAUSAS:');
-          console.error('   → Token expirado (status 401)');
-          console.error('   → JWT_SECRET distinto entre login y /me');
-          console.error('   → El endpoint /me no devuelve { success: true, user: {...} }');
           clearTokens();
         }
       })
       .catch((err) => {
-        console.error('❌ [AUTH #1] /me → CATCH (error de red):');
-        console.error('   name:', err.name);
-        console.error('   message:', err.message);
-        console.error('❌ [AUTH #1] POSIBLES CAUSAS:');
-        console.error('   → Backend no corre en', API);
-        console.error('   → CORS no permite origen', window.location.origin);
-        console.error('   → Sin internet / firewall');
+        console.error('❌ [AUTH #1] /me → CATCH (error de red):', err.message);
         console.warn('⚠️ [AUTH #1] Modo degradado: restaurando user sin providers desde JWT');
         setUser({ ...decoded, providers: [] });
       })
@@ -275,11 +303,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // ── useEffect #2 — Firebase listener ────────────────────────────────────
   useEffect(() => {
-    console.log('');
     console.log('🟣 [AUTH #2] Registrando onAuthStateChanged listener');
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('');
       console.log('🟣 [AUTH #2] onAuthStateChanged disparó');
       console.log('🟣 [AUTH #2] firebaseUser:', firebaseUser ? firebaseUser.email : 'null');
 
@@ -291,15 +317,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const existingToken = localStorage.getItem('accessToken');
       const existingUser = existingToken ? decodeJWT(existingToken) : null;
 
-      console.log('🟣 [AUTH #2] JWT en localStorage:', !!existingToken);
-      console.log('🟣 [AUTH #2] JWT decodificado:', existingUser?.email ?? 'ninguno');
-
       if (!existingUser) {
-        console.log('🟣 [AUTH #2] Sin JWT existente → skip sync (el login lo manejará)');
+        console.log('🟣 [AUTH #2] Sin JWT existente → skip sync');
         return;
       }
-
-      console.log('🟣 [AUTH #2] Hay JWT + Firebase user → sincronizando...');
 
       try {
         const refreshed = await syncFirebaseUserWithBackend(firebaseUser);
@@ -307,10 +328,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(refreshed);
       } catch (err) {
         console.error('❌ [AUTH #2] sync con backend falló:', err);
-        console.error('❌ [AUTH #2] POSIBLES CAUSAS:');
-        console.error('   → /auth/firebase no acepta el idToken de Firebase');
-        console.error('   → Firebase project ID no coincide con el backend');
-        console.error('   → Backend no tiene FIREBASE_PROJECT_ID configurado');
       }
     });
 
@@ -325,12 +342,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // ─────────────────────────────────────────────
 
   const login = async (email: string, password: string): Promise<void> => {
-    console.log('');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔥 [LOGIN] INICIO');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔥 [LOGIN] email:', email);
-    console.log('🔥 [LOGIN] URL:', `${API}/auth/login`);
+    console.log('🔥 [LOGIN] email:', email, '| URL:', `${API}/auth/login`);
 
     const res = await fetch(`${API}/auth/login`, {
       method: 'POST',
@@ -339,34 +351,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     console.log('🔥 [LOGIN] status:', res.status, res.statusText);
-
     const data = await res.json();
     console.log('🔥 [LOGIN] response body:', JSON.stringify(data));
 
-    if (!res.ok) {
-      console.error('❌ [LOGIN] Falló. Error:', data.error);
-      throw new Error(data.error ?? 'Error al iniciar sesión');
-    }
-
-    if (!data.accessToken) {
-      console.error('❌ [LOGIN] Backend no devolvió accessToken. data:', data);
-      throw new Error('Token inválido recibido del backend');
-    }
+    if (!res.ok) throw new Error(data.error ?? 'Error al iniciar sesión');
+    if (!data.accessToken) throw new Error('Token inválido recibido del backend');
 
     saveTokens(data.accessToken, data.refreshToken);
 
     const decoded = decodeJWT(data.accessToken);
-    if (!decoded) {
-      console.error('❌ [LOGIN] accessToken recibido no decodificable');
-      throw new Error('Token inválido recibido del backend');
-    }
+    if (!decoded) throw new Error('Token inválido recibido del backend');
 
     const appUser: AppUser = {
       ...decoded,
       providers: data.user?.providers ?? [],
     };
-
-    console.log('✅ [LOGIN] setUser →', appUser.email, '| rol:', appUser.rol, '| providers:', appUser.providers);
+    console.log('✅ [LOGIN] setUser →', appUser.email, '| rol:', appUser.rol);
     setUser(appUser);
   };
 
@@ -380,21 +380,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     name: string,
     apellido?: string
   ): Promise<void> => {
-    console.log('');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔥 [REGISTER] INICIO');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔥 [REGISTER] email:', email, '| nombre:', name, '| apellido:', apellido);
+    console.log('🔥 [REGISTER] email:', email, '| nombre:', name);
 
     const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/;
     if (!strongPasswordRegex.test(password)) {
-      console.error('❌ [REGISTER] Contraseña débil');
       throw new Error('La contraseña debe tener mayúscula, minúscula, número y símbolo (@$!%*?&)');
     }
-    if (!name?.trim()) {
-      console.error('❌ [REGISTER] Nombre vacío');
-      throw new Error('El nombre es obligatorio');
-    }
+    if (!name?.trim()) throw new Error('El nombre es obligatorio');
 
     const res = await fetch(`${API}/auth/register`, {
       method: 'POST',
@@ -406,18 +398,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const data = await res.json();
     console.log('🔥 [REGISTER] response:', JSON.stringify(data));
 
-    if (!res.ok) {
-      console.error('❌ [REGISTER] Error:', data.error);
-      throw new Error(data.error ?? 'Error al registrar');
-    }
+    if (!res.ok) throw new Error(data.error ?? 'Error al registrar');
 
     saveTokens(data.accessToken, data.refreshToken);
 
     const decoded = decodeJWT(data.accessToken);
-    if (!decoded) {
-      console.error('❌ [REGISTER] Token inválido post-registro');
-      throw new Error('Token inválido');
-    }
+    if (!decoded) throw new Error('Token inválido');
 
     const appUser: AppUser = { ...decoded, providers: data.user?.providers ?? [] };
     console.log('✅ [REGISTER] setUser →', appUser.email);
@@ -434,23 +420,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      console.log('🔥 [GOOGLE] Popup OK. uid:', result.user.uid, '| email:', result.user.email);
       const appUser = await syncFirebaseUserWithBackend(result.user);
       console.log('✅ [GOOGLE] setUser →', appUser.email);
       setUser(appUser);
     } catch (error: unknown) {
-      console.error('❌ [GOOGLE] Error:', error);
-
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const firebaseError = error as { code: string; customData?: { email?: string }; message?: string };
-        console.error('❌ [GOOGLE] Firebase error code:', firebaseError.code);
-
         if (firebaseError.code === 'auth/account-exists-with-different-credential') {
           const email = firebaseError.customData?.email;
-          console.error('❌ [GOOGLE] Cuenta existente con otro provider. Email:', email);
           if (email) {
             const methods = await fetchSignInMethodsForEmail(auth, email);
-            console.error('❌ [GOOGLE] Métodos registrados para ese email:', methods);
             throw new Error(`Este correo (${email}) ya está registrado con "${methods[0]}". Inicia sesión con ese método y luego vincula Google.`);
           }
         }
@@ -466,34 +445,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const result = await signInWithPopup(auth, githubProvider);
-      console.log('🔥 [GITHUB] Popup OK. uid:', result.user.uid, '| email:', result.user.email);
       const appUser = await syncFirebaseUserWithBackend(result.user);
       console.log('✅ [GITHUB] setUser →', appUser.email);
       setUser(appUser);
     } catch (error: unknown) {
-      console.error('❌ [GITHUB] Error:', error);
-
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const firebaseError = error as { code: string; customData?: { email?: string }; message?: string };
-        console.error('❌ [GITHUB] Firebase error code:', firebaseError.code);
-
         if (firebaseError.code === 'auth/account-exists-with-different-credential') {
           const email = firebaseError.customData?.email;
           if (email) {
             const methods = await fetchSignInMethodsForEmail(auth, email);
-            console.log('🔥 [GITHUB] Métodos para ese email:', methods);
-
             if (methods.includes('google.com')) {
-              console.log('🔥 [GITHUB] Vinculando con Google...');
               const googleProvider = new GoogleAuthProvider();
               const result = await signInWithPopup(auth, googleProvider);
               await linkWithPopup(result.user, githubProvider);
               const appUser = await syncFirebaseUserWithBackend(result.user);
-              console.log('✅ [GITHUB] Vinculado y setUser →', appUser.email);
               setUser(appUser);
               return;
             }
-
             if (methods.includes('password')) {
               throw new Error('Este correo ya tiene contraseña. Inicia sesión con email y luego vincula GitHub desde tu perfil.');
             }
@@ -536,15 +505,67 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // ─────────────────────────────────────────────
 
   const resetPassword = async (email: string): Promise<void> => {
-    console.log('🔥 [RESET] email:', email, '| URL:', `${API}/auth/forgot-password`);
+    console.log('🔥 [RESET] email:', email);
     const res = await fetch(`${API}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
     const data = await res.json();
-    console.log('🔥 [RESET] status:', res.status, '| response:', data);
     if (!res.ok) throw new Error(data.error || 'No se pudo enviar el correo');
+  };
+
+  // ─────────────────────────────────────────────
+  // ✅ UPDATE USER PROFILE
+  // ─────────────────────────────────────────────
+
+  const updateUserProfile = async (payload: UpdateProfilePayload): Promise<void> => {
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📝 [UPDATE PROFILE] INICIO');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📝 [UPDATE PROFILE] payload:', JSON.stringify(payload));
+
+    const token = localStorage.getItem('accessToken');
+    if (!token) throw new Error('No hay sesión activa');
+
+    const res = await fetch(`${API}/users/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    console.log('📝 [UPDATE PROFILE] status:', res.status);
+    const data = await res.json();
+    console.log('📝 [UPDATE PROFILE] response:', JSON.stringify(data));
+
+    if (!res.ok) {
+      throw new Error(data.error ?? 'Error al actualizar el perfil');
+    }
+
+    // Actualizar el estado local del usuario con los nuevos datos
+    setUser((prev) => {
+      if (!prev) return prev;
+      const updated: AppUser = {
+        ...prev,
+        nombre:      payload.nombre      ?? prev.nombre,
+        apellido:    payload.apellido    ?? prev.apellido,
+        name:        payload.nombre      ?? prev.name,
+        telefono:    payload.telefono    ?? prev.telefono,
+        bio:         payload.bio         ?? prev.bio,
+        website:     payload.website     ?? prev.website,
+        location:    payload.location    ?? prev.location,
+        github_url:  payload.github_url  ?? prev.github_url,
+        linkedin_url: payload.linkedin_url ?? prev.linkedin_url,
+        twitter:     payload.twitter     ?? prev.twitter,
+        avatar_url:  payload.avatar_url  ?? prev.avatar_url,
+      };
+      console.log('✅ [UPDATE PROFILE] setUser actualizado →', updated.email);
+      return updated;
+    });
   };
 
   // ─────────────────────────────────────────────
@@ -552,13 +573,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // ─────────────────────────────────────────────
 
   const logout = async (): Promise<void> => {
-    console.log('');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('🔴 [LOGOUT] INICIO');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     const refreshToken = localStorage.getItem('refreshToken');
-    console.log('🔴 [LOGOUT] refreshToken en localStorage:', !!refreshToken);
 
     if (refreshToken) {
       try {
@@ -602,6 +619,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         getLinkedProviders,
         resetPassword,
         logout,
+        updateUserProfile,
       }}
     >
       {children}

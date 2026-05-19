@@ -1,35 +1,36 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+// lib/firebase.ts
+// ──────────────────────────────────────────────────────────────
+// Firebase se configura desde variables de entorno NEXT_PUBLIC_*
+// para que funcione igual en local y en Docker
+// ──────────────────────────────────────────────────────────────
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+import { initializeApp, getApps } from "firebase/app";
+import { getAnalytics }           from "firebase/analytics";
+import { getAuth }                from "firebase/auth";
+import { getFirestore }           from "firebase/firestore";
+
 const firebaseConfig = {
-  apiKey: "AIzaSyDSa_-dIopUKLBcwfVp_19N1ZeXooFqNJ4",
-  authDomain: "techmock-ai.firebaseapp.com",
-  projectId: "techmock-ai",
-  storageBucket: "techmock-ai.firebasestorage.app",
-  messagingSenderId: "1087146527627",
-  appId: "1:1087146527627:web:f3a83828121d0daaa6bd8e",
-  measurementId: "G-MB0QR155V4"
+  apiKey:            process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
+  authDomain:        process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId:         process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+  storageBucket:     process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
+  appId:             process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
+  measurementId:     process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Evita reinicializar en hot reload (dev) o en múltiples imports
+const app = getApps().length === 0
+  ? initializeApp(firebaseConfig)
+  : getApps()[0];
 
-// Initialize Firebase Analytics (only in browser)
+// Analytics solo en el browser (no en SSR/build)
 let analytics;
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   analytics = getAnalytics(app);
 }
 
-// Initialize Firebase Authentication and get a reference to the service
 export const auth = getAuth(app);
-
-// Initialize Cloud Firestore and get a reference to the service
-export const db = getFirestore(app);
-
+export const db   = getFirestore(app);
 export { analytics };
 export default app;

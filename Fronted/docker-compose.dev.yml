@@ -1,0 +1,33 @@
+# ============================================================
+# docker-compose.dev.yml — DESARROLLO con hot reload
+#
+# Uso:
+#   docker compose --env-file .env.docker \
+#                  -f docker-compose.yml   \
+#                  -f docker-compose.dev.yml up --build
+#
+# Shortcut: make dev-up
+# ============================================================
+
+services:
+
+  frontend:
+    build:
+      target: dev-deps        # ← stage con todas las devDependencies
+
+    environment:
+      NODE_ENV: development
+      # En dev el frontend llama directamente al backend en localhost
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:4000/api/v1
+
+    # 🔥 Hot reload: tu código local se refleja en el contenedor
+    volumes:
+      - .:/app                      # monta todo el proyecto
+      - /app/node_modules           # excluye node_modules del host
+      - /app/.next                  # excluye .next del host
+
+    # Sobreescribe el CMD de producción por "next dev"
+    command: ["npm", "run", "dev"]
+
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"

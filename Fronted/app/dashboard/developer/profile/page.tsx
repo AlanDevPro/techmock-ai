@@ -40,7 +40,7 @@ interface Notificacion {
   fecha_creacion: string;
 }
 
-// ─── Datos estáticos de ejemplo (reemplaza con fetch a tu API) ───────────────
+// ─── Datos estáticos de ejemplo ───────────────────────────────────────────────
 const MOCK_STATS: EstadisticasUsuario = {
   total_entrevistas: 24,
   entrevistas_finalizadas: 19,
@@ -128,6 +128,7 @@ const MOCK_NOTIFICACIONES: Notificacion[] = [
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
 function formatDuracion(seg: number | null): string {
   if (!seg) return '—';
   const m = Math.floor(seg / 60);
@@ -135,7 +136,7 @@ function formatDuracion(seg: number | null): string {
   return `${m}m ${s}s`;
 }
 
-function formatFecha(iso: string | null): string {
+function formatFecha(iso: string | null | undefined): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('es-ES', {
     day: '2-digit', month: 'short', year: 'numeric',
@@ -148,11 +149,18 @@ function formatFechaCorta(iso: string): string {
   });
 }
 
+function formatMemberSince(fecha: string | undefined): string {
+  if (!fecha) return 'Desconocido';
+  const date = new Date(fecha);
+  if (isNaN(date.getTime())) return 'Desconocido';
+  return date.toLocaleDateString('es-ES', { year: 'numeric', month: 'long' });
+}
+
 function estadoBadge(estado: string) {
   const map: Record<string, { color: string; label: string }> = {
-    finalizada: { color: 'bg-green-900/50 text-green-400 border-green-800', label: '✓ Finalizada' },
-    abandonada: { color: 'bg-yellow-900/40 text-yellow-400 border-yellow-800', label: '⚠ Abandonada' },
-    en_progreso: { color: 'bg-blue-900/40 text-blue-400 border-blue-800', label: '⏳ En progreso' },
+    finalizada:  { color: 'bg-green-900/50 text-green-400 border-green-800',   label: '✓ Finalizada'  },
+    abandonada:  { color: 'bg-yellow-900/40 text-yellow-400 border-yellow-800', label: '⚠ Abandonada'  },
+    en_progreso: { color: 'bg-blue-900/40 text-blue-400 border-blue-800',       label: '⏳ En progreso' },
   };
   const cfg = map[estado] ?? { color: 'bg-gray-700 text-gray-400 border-gray-600', label: estado };
   return (
@@ -165,6 +173,65 @@ function estadoBadge(estado: string) {
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 type Tab = 'perfil' | 'estadisticas' | 'sesiones' | 'notificaciones' | 'cuentas';
 
+// ─── Field props type ─────────────────────────────────────────────────────────
+interface FieldProps {
+  label: string;
+  name: string;
+  value: string;
+  type?: string;
+  placeholder?: string;
+  prefix?: string;
+  readOnly?: boolean;
+  textarea?: boolean;
+  isEditing: boolean;
+  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ✅ Field declarado FUERA del componente principal para evitar el error de React
+// ═══════════════════════════════════════════════════════════════════════════════
+function Field({
+  label, name, value, type = 'text', placeholder, prefix, readOnly, textarea,
+  isEditing, onChange,
+}: FieldProps) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">
+        {label}
+        {readOnly && <span className="text-gray-700 normal-case ml-1">(no editable)</span>}
+      </label>
+      {isEditing && !readOnly ? (
+        textarea ? (
+          <textarea
+            name={name} value={value} onChange={onChange}
+            placeholder={placeholder} rows={3}
+            className="w-full bg-gray-800 border border-gray-700 focus:border-[#00ff00] rounded-lg px-4 py-2.5 text-white text-sm outline-none transition-colors placeholder-gray-600 resize-none"
+          />
+        ) : prefix ? (
+          <div className="flex items-center bg-gray-800 border border-gray-700 focus-within:border-[#00ff00] rounded-lg overflow-hidden transition-colors">
+            <span className="text-gray-500 text-sm px-3 border-r border-gray-700 py-2.5">{prefix}</span>
+            <input
+              type={type} name={name} value={value} onChange={onChange}
+              placeholder={placeholder}
+              className="flex-1 bg-transparent px-3 py-2.5 text-white text-sm outline-none placeholder-gray-600"
+            />
+          </div>
+        ) : (
+          <input
+            type={type} name={name} value={value} onChange={onChange}
+            placeholder={placeholder}
+            className="w-full bg-gray-800 border border-gray-700 focus:border-[#00ff00] rounded-lg px-4 py-2.5 text-white text-sm outline-none transition-colors placeholder-gray-600"
+          />
+        )
+      ) : (
+        <p className={`text-sm py-2.5 px-4 rounded-lg border border-gray-800 ${readOnly ? 'text-gray-500 bg-gray-800/30' : 'text-white bg-gray-800/50'}`}>
+          {value || <span className="text-gray-600 italic">—</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 export default function ProfilePage() {
   const {
@@ -176,60 +243,72 @@ export default function ProfilePage() {
   } = useAuth();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<Tab>('perfil');
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState('');
-  const [saveError, setSaveError] = useState('');
+  const [activeTab, setActiveTab]       = useState<Tab>('perfil');
+  const [isEditing, setIsEditing]       = useState(false);
+  const [isSaving, setIsSaving]         = useState(false);
+  const [saveSuccess, setSaveSuccess]   = useState('');
+  const [saveError, setSaveError]       = useState('');
   const [linkingSuccess, setLinkingSuccess] = useState('');
-  const [linkingError, setLinkingError] = useState('');
+  const [linkingError, setLinkingError]     = useState('');
 
   const [formData, setFormData] = useState({
-    nombre: '',
-    apellido: '',
-    email: '',
-    telefono: '',
-    bio: '',
-    website: '',
-    location: '',
-    github_url: '',
-    linkedin_url: '',
-    twitter: '',
-    avatar_url: '',
+    nombre:      '',
+    apellido:    '',
+    email:       '',
+    telefono:    '',
+    bio:         '',
+    website:     '',
+    location:    '',
+    github_url:  '',
+    linkedin_url:'',
+    twitter:     '',
+    avatar_url:  '',
   });
 
   useEffect(() => {
     if (!user) { router.push('/auth'); return; }
     setFormData({
-      nombre: user.nombre || user.name || '',
-      apellido: user.apellido || '',
-      email: user.email || '',
-      telefono: user.telefono || '',
-      bio: user.bio || '',
-      website: user.website || '',
-      location: user.location || '',
-      github_url: user.github_url || user.github || '',
-      linkedin_url: user.linkedin_url || '',
-      twitter: user.twitter || '',
-      avatar_url: user.avatar_url || '',
+      nombre:       user.nombre      ?? user.name     ?? '',
+      apellido:     user.apellido    ?? '',
+      email:        user.email       ?? '',
+      telefono:     user.telefono    ?? '',
+      bio:          user.bio         ?? '',
+      website:      user.website     ?? '',
+      location:     user.location    ?? '',
+      github_url:   user.github_url  ?? user.github   ?? '',
+      linkedin_url: user.linkedin_url ?? '',
+      twitter:      user.twitter     ?? '',
+      avatar_url:   user.avatar_url  ?? '',
     });
   }, [user, router]);
 
   if (!user) return null;
 
-  const providers = user?.providers ?? [];
-  const hasGoogle = providers.includes('google.com');
-  const hasGithub = providers.includes('github.com');
+  // ── Derived values ────────────────────────────────────────────────────────
+
+  const providers   = user.providers ?? [];
+  const hasGoogle   = providers.includes('google.com');
+  const hasGithub   = providers.includes('github.com');
   const hasPassword = providers.includes('password');
 
-  const displayName = `${user.nombre || user.name || ''} ${user.apellido || ''}`.trim() || user.email?.split('@')[0] || 'Usuario';
-  const displayEmail = user.email || '';
-  const memberSince = user.fecha_creacion || user.createdAt
-    ? new Date(user.fecha_creacion || user.createdAt).toLocaleDateString('es-ES', { year: 'numeric', month: 'long' })
-    : 'Desconocido';
-  const initials = displayName.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase();
+  const displayName = `${user.nombre ?? user.name ?? ''} ${user.apellido ?? ''}`.trim()
+    || user.email?.split('@')[0]
+    || 'Usuario';
+
+  const displayEmail = user.email ?? '';
+
+  const memberSince = formatMemberSince(user.fecha_creacion ?? user.createdAt);
+
+  const initials = displayName
+    .split(' ')
+    .map((n: string) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   const unreadCount = MOCK_NOTIFICACIONES.filter(n => !n.leida).length;
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -238,31 +317,35 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setIsSaving(true); setSaveError(''); setSaveSuccess('');
     try {
-      if (updateUserProfile) await updateUserProfile(formData);
+      await updateUserProfile(formData);
       setSaveSuccess('✅ Perfil actualizado correctamente');
       setIsEditing(false);
       setTimeout(() => setSaveSuccess(''), 4000);
-    } catch (error: any) {
-      setSaveError(error.message || 'Error al guardar');
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Error al guardar';
+      setSaveError(msg);
       setTimeout(() => setSaveError(''), 4000);
-    } finally { setIsSaving(false); }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCancel = () => {
     setFormData({
-      nombre: user.nombre || user.name || '',
-      apellido: user.apellido || '',
-      email: user.email || '',
-      telefono: user.telefono || '',
-      bio: user.bio || '',
-      website: user.website || '',
-      location: user.location || '',
-      github_url: user.github_url || user.github || '',
-      linkedin_url: user.linkedin_url || '',
-      twitter: user.twitter || '',
-      avatar_url: user.avatar_url || '',
+      nombre:       user.nombre      ?? user.name     ?? '',
+      apellido:     user.apellido    ?? '',
+      email:        user.email       ?? '',
+      telefono:     user.telefono    ?? '',
+      bio:          user.bio         ?? '',
+      website:      user.website     ?? '',
+      location:     user.location    ?? '',
+      github_url:   user.github_url  ?? user.github   ?? '',
+      linkedin_url: user.linkedin_url ?? '',
+      twitter:      user.twitter     ?? '',
+      avatar_url:   user.avatar_url  ?? '',
     });
-    setIsEditing(false); setSaveError('');
+    setIsEditing(false);
+    setSaveError('');
   };
 
   const handleLinkGithub = async () => {
@@ -271,7 +354,11 @@ export default function ProfilePage() {
       await linkGithubToCurrentUser();
       setLinkingSuccess('✅ GitHub vinculado correctamente');
       setTimeout(() => setLinkingSuccess(''), 3000);
-    } catch (error: any) { setLinkingError(error.message); setTimeout(() => setLinkingError(''), 3000); }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Error al vincular';
+      setLinkingError(msg);
+      setTimeout(() => setLinkingError(''), 3000);
+    }
   };
 
   const handleLinkGoogle = async () => {
@@ -280,14 +367,19 @@ export default function ProfilePage() {
       await linkGoogleToCurrentUser();
       setLinkingSuccess('✅ Google vinculado correctamente');
       setTimeout(() => setLinkingSuccess(''), 3000);
-    } catch (error: any) { setLinkingError(error.message); setTimeout(() => setLinkingError(''), 3000); }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Error al vincular';
+      setLinkingError(msg);
+      setTimeout(() => setLinkingError(''), 3000);
+    }
   };
 
   const handleLogout = async () => {
     try { await logout(); router.push('/'); } catch (e) { console.error(e); }
   };
 
-  // ── Tab definitions ──
+  // ── Tab definitions ───────────────────────────────────────────────────────
+
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
     {
       id: 'perfil', label: 'Perfil',
@@ -312,43 +404,7 @@ export default function ProfilePage() {
     },
   ];
 
-  // ── Render field helper ──
-  const Field = ({
-    label, name, value, type = 'text', placeholder, prefix, readOnly, textarea,
-  }: {
-    label: string; name: string; value: string; type?: string;
-    placeholder?: string; prefix?: string; readOnly?: boolean; textarea?: boolean;
-  }) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">
-        {label}{readOnly && <span className="text-gray-700 normal-case ml-1">(no editable)</span>}
-      </label>
-      {isEditing && !readOnly ? (
-        textarea ? (
-          <textarea
-            name={name} value={value} onChange={handleInputChange}
-            placeholder={placeholder} rows={3}
-            className="w-full bg-gray-800 border border-gray-700 focus:border-[#00ff00] rounded-lg px-4 py-2.5 text-white text-sm outline-none transition-colors placeholder-gray-600 resize-none"
-          />
-        ) : prefix ? (
-          <div className="flex items-center bg-gray-800 border border-gray-700 focus-within:border-[#00ff00] rounded-lg overflow-hidden transition-colors">
-            <span className="text-gray-500 text-sm px-3 border-r border-gray-700 py-2.5">{prefix}</span>
-            <input type={type} name={name} value={value} onChange={handleInputChange} placeholder={placeholder}
-              className="flex-1 bg-transparent px-3 py-2.5 text-white text-sm outline-none placeholder-gray-600" />
-          </div>
-        ) : (
-          <input type={type} name={name} value={value} onChange={handleInputChange} placeholder={placeholder}
-            className="w-full bg-gray-800 border border-gray-700 focus:border-[#00ff00] rounded-lg px-4 py-2.5 text-white text-sm outline-none transition-colors placeholder-gray-600" />
-        )
-      ) : (
-        <p className={`text-sm py-2.5 px-4 rounded-lg border border-gray-800 ${readOnly ? 'text-gray-500 bg-gray-800/30' : 'text-white bg-gray-800/50'}`}>
-          {value || <span className="text-gray-600 italic">—</span>}
-        </p>
-      )}
-    </div>
-  );
-
-  // ══════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-[#080808] text-white font-sans">
 
@@ -373,9 +429,11 @@ export default function ProfilePage() {
               <span className="hidden sm:block">{displayName}</span>
             </div>
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
-              (user.rol === 'admin') ? 'bg-purple-900/40 text-purple-400 border-purple-800' : 'bg-[#00ff00]/10 text-[#00ff00] border-[#00ff00]/30'
+              user.rol === 'admin'
+                ? 'bg-purple-900/40 text-purple-400 border-purple-800'
+                : 'bg-[#00ff00]/10 text-[#00ff00] border-[#00ff00]/30'
             }`}>
-              {user.rol || 'developer'}
+              {user.rol ?? 'developer'}
             </span>
             <button onClick={handleLogout} className="bg-red-600/80 hover:bg-red-600 px-3 py-1.5 rounded text-xs font-medium transition-colors">
               Logout
@@ -388,11 +446,11 @@ export default function ProfilePage() {
 
         {/* ── Hero card ── */}
         <div className="relative bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6 overflow-hidden">
-          {/* Decorative bg */}
           <div className="absolute inset-0 opacity-5">
             <div className="absolute top-0 right-0 w-96 h-96 bg-[#00ff00] rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
           </div>
           <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-5">
+
             {/* Avatar */}
             <div className="relative flex-shrink-0">
               {user.avatar_url ? (
@@ -417,8 +475,8 @@ export default function ProfilePage() {
               </div>
               <p className="text-gray-400 text-sm mb-2">{displayEmail}</p>
               <div className="flex flex-wrap gap-2 text-xs text-gray-500">
-                {user.telefono && <span className="flex items-center gap-1">📞 {user.telefono}</span>}
-                {user.location && <span className="flex items-center gap-1">📍 {user.location}</span>}
+                {user.telefono && <span>📞 {user.telefono}</span>}
+                {user.location && <span>📍 {user.location}</span>}
                 <span>🗓 Miembro desde {memberSince}</span>
                 {MOCK_STATS.ultima_entrevista_fecha && (
                   <span>🕐 Última entrevista: {formatFecha(MOCK_STATS.ultima_entrevista_fecha)}</span>
@@ -426,12 +484,12 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Kpi strip */}
+            {/* KPI strip */}
             <div className="flex gap-4 flex-shrink-0">
               {[
                 { label: 'Entrevistas', value: MOCK_STATS.total_entrevistas },
-                { label: 'Promedio', value: MOCK_STATS.puntaje_promedio ? `${MOCK_STATS.puntaje_promedio}` : '—' },
-                { label: 'Racha', value: `${MOCK_STATS.racha_actual}d 🔥` },
+                { label: 'Promedio',    value: MOCK_STATS.puntaje_promedio ? `${MOCK_STATS.puntaje_promedio}` : '—' },
+                { label: 'Racha',       value: `${MOCK_STATS.racha_actual}d 🔥` },
               ].map(k => (
                 <div key={k.label} className="text-center">
                   <p className="text-[#00ff00] font-bold text-xl leading-none">{k.value}</p>
@@ -443,8 +501,12 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Feedback messages ── */}
-        {saveSuccess && <div className="mb-4 bg-green-900/40 border border-green-700 rounded-lg p-3 text-green-300 text-sm">{saveSuccess}</div>}
-        {saveError && <div className="mb-4 bg-red-900/40 border border-red-700 rounded-lg p-3 text-red-300 text-sm">{saveError}</div>}
+        {saveSuccess && (
+          <div className="mb-4 bg-green-900/40 border border-green-700 rounded-lg p-3 text-green-300 text-sm">{saveSuccess}</div>
+        )}
+        {saveError && (
+          <div className="mb-4 bg-red-900/40 border border-red-700 rounded-lg p-3 text-red-300 text-sm">{saveError}</div>
+        )}
 
         {/* ── Tabs ── */}
         <div className="flex gap-1 bg-gray-900/60 border border-gray-800 rounded-xl p-1 mb-6 overflow-x-auto">
@@ -461,7 +523,9 @@ export default function ProfilePage() {
               {tab.icon}
               {tab.label}
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className={`ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full ${activeTab === tab.id ? 'bg-black/20 text-black' : 'bg-red-600 text-white'}`}>
+                <span className={`ml-1 text-xs font-bold px-1.5 py-0.5 rounded-full ${
+                  activeTab === tab.id ? 'bg-black/20 text-black' : 'bg-red-600 text-white'
+                }`}>
                   {tab.badge}
                 </span>
               )}
@@ -474,7 +538,6 @@ export default function ProfilePage() {
         ══════════════════════════════════════════ */}
         {activeTab === 'perfil' && (
           <div className="space-y-6">
-            {/* Edit/Save actions */}
             <div className="flex justify-end gap-3">
               {!isEditing ? (
                 <button onClick={() => setIsEditing(true)} className="flex items-center gap-2 bg-[#00ff00] hover:bg-[#00cc00] text-black px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
@@ -483,9 +546,14 @@ export default function ProfilePage() {
                 </button>
               ) : (
                 <>
-                  <button onClick={handleCancel} className="px-4 py-2 rounded-lg text-sm text-gray-400 border border-gray-700 hover:border-gray-500 transition-colors">Cancelar</button>
+                  <button onClick={handleCancel} className="px-4 py-2 rounded-lg text-sm text-gray-400 border border-gray-700 hover:border-gray-500 transition-colors">
+                    Cancelar
+                  </button>
                   <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 bg-[#00ff00] hover:bg-[#00cc00] disabled:opacity-50 text-black px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-                    {isSaving ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Guardando...</> : <>✓ Guardar Cambios</>}
+                    {isSaving
+                      ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Guardando...</>
+                      : <>✓ Guardar Cambios</>
+                    }
                   </button>
                 </>
               )}
@@ -497,13 +565,13 @@ export default function ProfilePage() {
                 <h3 className="text-[#00ff00] font-semibold text-xs uppercase tracking-widest mb-5">Información Personal</h3>
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Nombre" name="nombre" value={formData.nombre} placeholder="Tu nombre" />
-                    <Field label="Apellido" name="apellido" value={formData.apellido} placeholder="Tu apellido" />
+                    <Field label="Nombre"   name="nombre"   value={formData.nombre}   placeholder="Tu nombre"   isEditing={isEditing} onChange={handleInputChange} />
+                    <Field label="Apellido" name="apellido" value={formData.apellido} placeholder="Tu apellido" isEditing={isEditing} onChange={handleInputChange} />
                   </div>
-                  <Field label="Email" name="email" value={formData.email} readOnly />
-                  <Field label="Teléfono" name="telefono" value={formData.telefono} type="tel" placeholder="+591 7XXXXXXX" />
-                  <Field label="Ubicación" name="location" value={formData.location} placeholder="Ciudad, País" />
-                  <Field label="Biografía" name="bio" value={formData.bio} placeholder="Cuéntanos sobre ti..." textarea />
+                  <Field label="Email"     name="email"    value={formData.email}    readOnly                  isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="Teléfono"  name="telefono" value={formData.telefono} type="tel" placeholder="+591 7XXXXXXX" isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="Ubicación" name="location" value={formData.location} placeholder="Ciudad, País" isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="Biografía" name="bio"      value={formData.bio}      placeholder="Cuéntanos sobre ti..." textarea isEditing={isEditing} onChange={handleInputChange} />
                 </div>
               </div>
 
@@ -511,14 +579,12 @@ export default function ProfilePage() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h3 className="text-[#00ff00] font-semibold text-xs uppercase tracking-widest mb-5">Links & Redes Sociales</h3>
                 <div className="space-y-4">
-                  <Field label="Sitio web" name="website" value={formData.website} type="url" placeholder="https://tu-portfolio.com" />
-                  <Field label="GitHub URL" name="github_url" value={formData.github_url} prefix="github.com/" placeholder="tu-usuario" />
-                  <Field label="LinkedIn URL" name="linkedin_url" value={formData.linkedin_url} prefix="linkedin.com/in/" placeholder="tu-perfil" />
-                  <Field label="Twitter / X" name="twitter" value={formData.twitter} prefix="@" placeholder="usuario" />
-                  <Field label="Avatar URL" name="avatar_url" value={formData.avatar_url} type="url" placeholder="https://..." />
+                  <Field label="Sitio web"    name="website"      value={formData.website}      type="url" placeholder="https://tu-portfolio.com"  isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="GitHub URL"   name="github_url"   value={formData.github_url}   prefix="github.com/"     placeholder="tu-usuario"  isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="LinkedIn URL" name="linkedin_url" value={formData.linkedin_url} prefix="linkedin.com/in/" placeholder="tu-perfil"   isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="Twitter / X"  name="twitter"      value={formData.twitter}      prefix="@"               placeholder="usuario"      isEditing={isEditing} onChange={handleInputChange} />
+                  <Field label="Avatar URL"   name="avatar_url"   value={formData.avatar_url}   type="url" placeholder="https://..."              isEditing={isEditing} onChange={handleInputChange} />
                 </div>
-
-                {/* Vista previa links */}
                 {!isEditing && (
                   <div className="mt-5 pt-4 border-t border-gray-800 flex flex-wrap gap-2">
                     {formData.website && (
@@ -571,14 +637,12 @@ export default function ProfilePage() {
         ══════════════════════════════════════════ */}
         {activeTab === 'estadisticas' && (
           <div className="space-y-6">
-
-            {/* KPI grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: 'Total entrevistas', value: MOCK_STATS.total_entrevistas, icon: '📋', color: 'text-white' },
-                { label: 'Finalizadas', value: MOCK_STATS.entrevistas_finalizadas, icon: '✅', color: 'text-green-400' },
-                { label: 'Abandonadas', value: MOCK_STATS.entrevistas_abandonadas, icon: '⚠️', color: 'text-yellow-400' },
-                { label: 'Racha actual', value: `${MOCK_STATS.racha_actual} días`, icon: '🔥', color: 'text-orange-400' },
+                { label: 'Total entrevistas', value: MOCK_STATS.total_entrevistas,      icon: '📋', color: 'text-white' },
+                { label: 'Finalizadas',        value: MOCK_STATS.entrevistas_finalizadas, icon: '✅', color: 'text-green-400' },
+                { label: 'Abandonadas',        value: MOCK_STATS.entrevistas_abandonadas, icon: '⚠️', color: 'text-yellow-400' },
+                { label: 'Racha actual',       value: `${MOCK_STATS.racha_actual} días`, icon: '🔥', color: 'text-orange-400' },
               ].map(k => (
                 <div key={k.label} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <p className="text-2xl mb-1">{k.icon}</p>
@@ -589,14 +653,13 @@ export default function ProfilePage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Puntajes */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h3 className="text-[#00ff00] font-semibold text-xs uppercase tracking-widest mb-5">Puntajes</h3>
                 <div className="space-y-4">
                   {[
                     { label: 'Puntaje promedio', value: MOCK_STATS.puntaje_promedio, suffix: '/100', bar: MOCK_STATS.puntaje_promedio },
-                    { label: 'Mejor puntaje', value: MOCK_STATS.mejor_puntaje, suffix: '/100', bar: MOCK_STATS.mejor_puntaje, barColor: 'bg-green-500' },
-                    { label: 'Peor puntaje', value: MOCK_STATS.peor_puntaje, suffix: '/100', bar: MOCK_STATS.peor_puntaje, barColor: 'bg-red-500' },
+                    { label: 'Mejor puntaje',    value: MOCK_STATS.mejor_puntaje,    suffix: '/100', bar: MOCK_STATS.mejor_puntaje,    barColor: 'bg-green-500' },
+                    { label: 'Peor puntaje',     value: MOCK_STATS.peor_puntaje,     suffix: '/100', bar: MOCK_STATS.peor_puntaje,     barColor: 'bg-red-500'   },
                   ].map(s => (
                     <div key={s.label}>
                       <div className="flex justify-between mb-1">
@@ -604,26 +667,23 @@ export default function ProfilePage() {
                         <span className="text-white font-semibold text-sm">{s.value ?? '—'}{s.value ? s.suffix : ''}</span>
                       </div>
                       <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${s.barColor ?? 'bg-[#00ff00]'}`}
-                          style={{ width: `${s.bar ?? 0}%` }}
-                        />
+                        <div className={`h-full rounded-full transition-all ${s.barColor ?? 'bg-[#00ff00]'}`}
+                          style={{ width: `${s.bar ?? 0}%` }} />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Tiempo & actividad */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h3 className="text-[#00ff00] font-semibold text-xs uppercase tracking-widest mb-5">Actividad</h3>
                 <div className="space-y-3">
                   {[
                     { label: 'Tiempo promedio por sesión', value: formatDuracion(MOCK_STATS.tiempo_promedio_segundos), icon: '⏱' },
-                    { label: 'Tecnología favorita', value: MOCK_STATS.tecnologia_favorita ?? '—', icon: '💻' },
-                    { label: 'Racha máxima', value: `${MOCK_STATS.racha_maxima} días`, icon: '🏆' },
-                    { label: 'Racha actual', value: `${MOCK_STATS.racha_actual} días`, icon: '🔥' },
-                    { label: 'Última entrevista', value: formatFecha(MOCK_STATS.ultima_entrevista_fecha), icon: '🗓' },
+                    { label: 'Tecnología favorita',        value: MOCK_STATS.tecnologia_favorita ?? '—',              icon: '💻' },
+                    { label: 'Racha máxima',               value: `${MOCK_STATS.racha_maxima} días`,                  icon: '🏆' },
+                    { label: 'Racha actual',               value: `${MOCK_STATS.racha_actual} días`,                  icon: '🔥' },
+                    { label: 'Última entrevista',          value: formatFecha(MOCK_STATS.ultima_entrevista_fecha),     icon: '🗓' },
                     {
                       label: 'Tasa de finalización',
                       value: `${Math.round((MOCK_STATS.entrevistas_finalizadas / Math.max(MOCK_STATS.total_entrevistas, 1)) * 100)}%`,
@@ -648,11 +708,9 @@ export default function ProfilePage() {
         ══════════════════════════════════════════ */}
         {activeTab === 'sesiones' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-gray-400 text-sm">{MOCK_SESIONES.length} sesiones en tu historial</p>
-            </div>
+            <p className="text-gray-400 text-sm mb-2">{MOCK_SESIONES.length} sesiones en tu historial</p>
             {MOCK_SESIONES.map(ses => (
-              <div key={ses.id} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-5 transition-colors group">
+              <div key={ses.id} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-5 transition-colors">
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -671,7 +729,7 @@ export default function ProfilePage() {
                     </div>
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    {ses.puntaje !== null && ses.puntaje !== undefined ? (
+                    {ses.puntaje != null ? (
                       <div>
                         <p className={`text-2xl font-bold ${ses.puntaje >= 80 ? 'text-green-400' : ses.puntaje >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
                           {ses.puntaje}
@@ -700,11 +758,7 @@ export default function ProfilePage() {
               )}
             </div>
             {MOCK_NOTIFICACIONES.map(n => (
-              <div key={n.id}
-                className={`border rounded-xl p-4 transition-colors ${
-                  !n.leida ? 'bg-gray-900 border-gray-700' : 'bg-gray-900/40 border-gray-800'
-                }`}
-              >
+              <div key={n.id} className={`border rounded-xl p-4 transition-colors ${!n.leida ? 'bg-gray-900 border-gray-700' : 'bg-gray-900/40 border-gray-800'}`}>
                 <div className="flex items-start gap-3">
                   <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${!n.leida ? 'bg-[#00ff00]' : 'bg-gray-700'}`} />
                   <div className="flex-1 min-w-0">
@@ -714,18 +768,15 @@ export default function ProfilePage() {
                     </div>
                     {n.mensaje && <p className="text-gray-500 text-xs leading-relaxed">{n.mensaje}</p>}
                     {n.url_accion && (
-                      <button
-                        onClick={() => router.push(n.url_accion!)}
-                        className="mt-2 text-xs text-[#00ff00] hover:underline"
-                      >
+                      <button onClick={() => router.push(n.url_accion!)} className="mt-2 text-xs text-[#00ff00] hover:underline">
                         Ver más →
                       </button>
                     )}
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded border flex-shrink-0 ${
-                    n.tipo === 'evaluacion' ? 'border-purple-800 text-purple-400 bg-purple-900/20' :
+                    n.tipo === 'evaluacion'    ? 'border-purple-800 text-purple-400 bg-purple-900/20' :
                     n.tipo === 'reclutamiento' ? 'border-blue-800 text-blue-400 bg-blue-900/20' :
-                    'border-orange-800 text-orange-400 bg-orange-900/20'
+                                                'border-orange-800 text-orange-400 bg-orange-900/20'
                   }`}>
                     {n.tipo}
                   </span>
@@ -741,7 +792,7 @@ export default function ProfilePage() {
         {activeTab === 'cuentas' && (
           <div className="space-y-6">
             {linkingSuccess && <div className="bg-green-900/40 border border-green-700 rounded-lg p-3 text-green-300 text-sm">{linkingSuccess}</div>}
-            {linkingError && <div className="bg-red-900/40 border border-red-700 rounded-lg p-3 text-red-300 text-sm">{linkingError}</div>}
+            {linkingError   && <div className="bg-red-900/40 border border-red-700 rounded-lg p-3 text-red-300 text-sm">{linkingError}</div>}
 
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
               <h3 className="text-[#00ff00] font-semibold text-xs uppercase tracking-widest mb-5">Métodos de autenticación</h3>
@@ -751,7 +802,9 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between p-4 bg-gray-800/40 rounded-xl border border-gray-800">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 bg-gray-700 rounded-lg flex items-center justify-center">
-                      <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                      <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
                     </div>
                     <div>
                       <p className="text-white text-sm font-medium">Email y contraseña</p>
@@ -779,11 +832,10 @@ export default function ProfilePage() {
                       <p className="text-gray-500 text-xs">Inicio de sesión con Google</p>
                     </div>
                   </div>
-                  {hasGoogle ? (
-                    <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-900/40 text-green-400 border border-green-800">✓ Vinculado</span>
-                  ) : (
-                    <button onClick={handleLinkGoogle} className="text-xs px-3 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-gray-100 transition-colors">Vincular</button>
-                  )}
+                  {hasGoogle
+                    ? <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-900/40 text-green-400 border border-green-800">✓ Vinculado</span>
+                    : <button onClick={handleLinkGoogle} className="text-xs px-3 py-1.5 rounded-lg bg-white text-black font-semibold hover:bg-gray-100 transition-colors">Vincular</button>
+                  }
                 </div>
 
                 {/* GitHub */}
@@ -799,11 +851,10 @@ export default function ProfilePage() {
                       <p className="text-gray-500 text-xs">Inicio de sesión con GitHub</p>
                     </div>
                   </div>
-                  {hasGithub ? (
-                    <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-900/40 text-green-400 border border-green-800">✓ Vinculado</span>
-                  ) : (
-                    <button onClick={handleLinkGithub} className="text-xs px-3 py-1.5 rounded-lg bg-gray-700 text-white font-semibold hover:bg-gray-600 border border-gray-600 transition-colors">Vincular</button>
-                  )}
+                  {hasGithub
+                    ? <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-900/40 text-green-400 border border-green-800">✓ Vinculado</span>
+                    : <button onClick={handleLinkGithub} className="text-xs px-3 py-1.5 rounded-lg bg-gray-700 text-white font-semibold hover:bg-gray-600 border border-gray-600 transition-colors">Vincular</button>
+                  }
                 </div>
               </div>
             </div>
@@ -814,9 +865,9 @@ export default function ProfilePage() {
               <div className="space-y-3">
                 {[
                   { label: 'Email verificado', value: user.email_verificado ? 'Sí ✓' : 'Pendiente', ok: !!user.email_verificado },
-                  { label: 'Cuenta activa', value: user.activo !== false ? 'Sí ✓' : 'Suspendida', ok: user.activo !== false },
-                  { label: 'Rol', value: user.rol || 'developer', ok: true },
-                  { label: 'Último acceso', value: formatFecha(user.ultimo_acceso || user.ultimo_login || null), ok: true },
+                  { label: 'Cuenta activa',    value: user.activo !== false ? 'Sí ✓' : 'Suspendida', ok: user.activo !== false  },
+                  { label: 'Rol',              value: user.rol ?? 'developer',                        ok: true                   },
+                  { label: 'Último acceso',    value: formatFecha(user.ultimo_acceso ?? user.ultimo_login), ok: true              },
                 ].map(item => (
                   <div key={item.label} className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
                     <span className="text-gray-400 text-sm">{item.label}</span>

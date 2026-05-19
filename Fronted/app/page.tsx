@@ -3,7 +3,6 @@
 import React from 'react';
 import { useNavigation } from '../hooks';
 import {
-  Header,
   HeroSection,
   InfrastructureSection,
   ProblemsSection,
@@ -13,30 +12,10 @@ import {
 } from '../components';
 
 export default function Home() {
-  const { navigateToAuth, navigateToDashboard, navigateToHome } = useNavigation();
-
-  const handleNavigation = (route: string) => {
-    switch (route) {
-      case '/':
-        navigateToHome();
-        break;
-      case '/auth':
-        navigateToAuth();
-        break;
-      case '/dashboard':
-      case '/tasks':
-      case '/analysis':
-        navigateToDashboard();
-        break;
-      default:
-        // Handle other routes or show not found
-        console.log(`Navigation to ${route} not implemented`);
-    }
-  };
+  const { navigateToAuth, navigateToDashboard } = useNavigation();
 
   return (
     <div className="min-h-screen bg-black text-white font-sans">
-      <Header onNavigate={handleNavigation} />
 
       <HeroSection
         onLoginClick={navigateToAuth}

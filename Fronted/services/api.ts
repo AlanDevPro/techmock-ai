@@ -1,54 +1,39 @@
 // services/api.ts
 
 // ─────────────────────────────────────────────
-// URLS BASE
+// URL BASE
 // ─────────────────────────────────────────────
 
-const IS_LOCAL =
-  typeof window !== "undefined" &&
-  window.location.hostname === "localhost";
-
-// IDE separado
-
-
-// Backend principal
-export const BACKEND_API_URL = IS_LOCAL
-  ? "http://localhost:4000/api/v1"
-  : "https://tu-backend-production.com/api/v1";
+export const BACKEND_API_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  "http://localhost:4000/api/v1";
 
 // ─────────────────────────────────────────────
-// HELPERS
+// AUTH TOKEN
 // ─────────────────────────────────────────────
 
-function getAuthToken() {
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+
   return localStorage.getItem("accessToken");
 }
 
 // ─────────────────────────────────────────────
-// IDE / EJECUCIÓN DE CÓDIGO
-// ─────────────────────────────────────────────
-
-
-
-// ─────────────────────────────────────────────
-// FETCH GENERAL BACKEND
+// FETCH GENERAL
 // ─────────────────────────────────────────────
 
 export async function apiFetch(
   endpoint: string,
   options: RequestInit = {}
-) {
+): Promise<Response> {
 
   const token = getAuthToken();
 
   const headers: HeadersInit = {
-
     "Content-Type": "application/json",
-
     ...(token && {
       Authorization: `Bearer ${token}`,
     }),
-
     ...options.headers,
   };
 
@@ -60,22 +45,33 @@ export async function apiFetch(
     }
   );
 
-  // ───────────────────────────────────────────
-  // AUTH ERRORS GLOBALES
-  // ───────────────────────────────────────────
-
   if (response.status === 401) {
-
-    console.error(
-      "Sesión expirada o token inválido"
-    );
-
-    // futuro:
-    // logout()
-    // redirect login
-    // refresh token
-
+    console.error("Sesión expirada");
   }
 
   return response;
+}
+
+// ─────────────────────────────────────────────
+// RUN CODE
+// ─────────────────────────────────────────────
+
+export async function runCode(
+  code: string,
+  language: string
+) {
+
+  const response = await apiFetch("/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      code,
+      language,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Error ejecutando código");
+  }
+
+  return response.json();
 }

@@ -1,0 +1,33 @@
+# ============================================================
+# docker-compose.prod.yml — PRODUCCIÓN
+#
+# Uso:
+#   docker compose --env-file .env.docker \
+#                  -f docker-compose.yml   \
+#                  -f docker-compose.prod.yml up -d --build
+#
+# Shortcut: make prod-up
+# ============================================================
+
+services:
+
+  frontend:
+    build:
+      target: runner          # ← imagen final mínima (standalone)
+
+    environment:
+      NODE_ENV: production
+      # En producción apunta al dominio real del backend
+      NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL_PROD}
+
+    # Sin volumes — imagen inmutable en producción
+    restart: always
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
