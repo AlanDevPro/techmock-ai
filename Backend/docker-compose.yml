@@ -1,0 +1,128 @@
+# ============================================================
+# docker-compose.yml  — BASE (compartido por dev y prod)
+# No se usa directamente: siempre se combina con dev o prod
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # PostgreSQL 16 — Base de datos principal
+  # ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: techmock_postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # Optimizaciones de rendimiento
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    volumes:
+      # Persistencia de datos — sobrevive a reinicios y recreaciones
+      - postgres_data:/var/lib/postgresql/data
+      # Script de inicialización — solo se ejecuta en el PRIMER arranque
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    networks:
+      - techmock_network
+
+  # ──────────────────────────────────────────────────────────
+  # API Backend Node.js
+  # ──────────────────────────────────────────────────────────
+  api:
+    container_name: techmock_api
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-4000}
+      # ⚠️ La DATABASE_URL apunta al servicio "postgres" (nombre del contenedor)
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      FRONTEND_URL: ${FRONTEND_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+      K8S_NAMESPACE: ${K8S_NAMESPACE}
+      K8S_RUNNER_JS: ${K8S_RUNNER_JS}
+      K8S_RUNNER_PY: ${K8S_RUNNER_PY}
+      K8S_RUNNER_JAVA: ${K8S_RUNNER_JAVA}
+      K8S_JOB_TIMEOUT_S: ${K8S_JOB_TIMEOUT_S}
+      K8S_POLL_INTERVAL_MS: ${K8S_POLL_INTERVAL_MS}
+      K8S_MAX_POLLS: ${K8S_MAX_POLLS}
+
+    ports:
+      - "${PORT:-4000}:4000"
+
+    # La API NO arranca hasta que postgres esté healthy
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - techmock_network
+
+  # ──────────────────────────────────────────────────────────
+  # pgAdmin 4 — GUI para gestionar la base de datos
+  # ──────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: techmock_pgadmin
+    restart: unless-stopped
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@techmock.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: "False"   # Modo single-user (sin login)
+
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - techmock_network
+
+# ============================================================
+# Volúmenes nombrados — persisten entre reinicios
+# ============================================================
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+# ============================================================
+# Red interna — aísla los servicios del host
+# ============================================================
+networks:
+  techmock_network:
+    driver: bridge

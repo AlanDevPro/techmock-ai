@@ -1,0 +1,59 @@
+# ============================================================
+# docker-compose.prod.yml  — PRODUCCIÓN
+#
+# Uso:  docker compose -f docker-compose.yml \
+#                      -f docker-compose.prod.yml up -d --build
+# ============================================================
+
+services:
+
+  api:
+    build:
+      target: runner          # ← imagen final optimizada, sin devDeps
+
+    environment:
+      NODE_ENV: production
+
+    # En producción NO montamos el código fuente (imagen inmutable)
+    # Sin volumes de código — el código ya está dentro de la imagen
+
+    # Política agresiva de reinicio
+    restart: always
+
+    # Límites de recursos del contenedor
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  postgres:
+    restart: always
+
+    # En prod NO exponemos el puerto de postgres al host (solo acceso interno)
+    ports: []
+
+    # Parámetros de rendimiento para producción
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # pgAdmin deshabilitado en producción por seguridad
+  pgadmin:
+    profiles: ["tools"]   # Solo se levanta si se pasa --profile tools

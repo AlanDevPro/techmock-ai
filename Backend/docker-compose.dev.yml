@@ -1,0 +1,43 @@
+# ============================================================
+# docker-compose.dev.yml  — DESARROLLO
+#
+# Uso:  docker compose -f docker-compose.yml \
+#                      -f docker-compose.dev.yml up
+#
+# Shortcut con el alias del .env.docker:
+#   docker compose --env-file .env.docker \
+#                  -f docker-compose.yml   \
+#                  -f docker-compose.dev.yml up --build
+# ============================================================
+
+services:
+
+  api:
+    # En dev usamos el target dev-deps para tener nodemon
+    build:
+      target: dev-deps       # ← stage con devDependencies completas
+
+    environment:
+      NODE_ENV: development
+
+    # 🔥 Hot reload: el código local se monta dentro del contenedor
+    volumes:
+      - .:/app                          # monta todo el proyecto
+      - /app/node_modules               # excluye node_modules del host
+
+    # Sobreescribe el CMD de producción por nodemon
+    command: ["node_modules/.bin/nodemon", "src/app.js"]
+
+    # En dev exponemos también el puerto de debug de Node
+    ports:
+      - "${PORT:-4000}:4000"
+      - "9229:9229"   # Node.js inspector (Chrome DevTools)
+
+  postgres:
+    # En dev mapeamos al puerto 5433 para no chocar con un postgres local
+    ports:
+      - "5433:5432"
+
+  pgadmin:
+    ports:
+      - "5050:80"
