@@ -168,7 +168,7 @@ export default function AnalisisPage() {
 
           {/* ── Header ── */}
           <div className="fi" style={{ marginBottom: "28px" }}>
-            <button onClick={() => router.push("/dashboard/developer/interviews")} style={styles.backLink}>
+            <button onClick={() => router.push("/dashboard/developer")} style={styles.backLink}>
               ← Volver a entrevistas
             </button>
             <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "8px" }}>
