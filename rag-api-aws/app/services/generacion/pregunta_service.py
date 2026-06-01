@@ -200,8 +200,10 @@ class PreguntaService:
             logger.info("✅ Pregunta y sesión persistidas: %s", sesion.id)
             return sesion.id
 
-        except Exception as exc:
-            logger.error("Error persistiendo pregunta/sesión (no bloqueante): %s", exc)
+        except Exception:
+            logger.exception(
+                "Error persistiendo pregunta/sesión"
+            )
             return None
 
 

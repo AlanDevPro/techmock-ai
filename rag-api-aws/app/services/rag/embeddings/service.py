@@ -70,14 +70,37 @@ class BedrockEmbeddingService(BaseEmbeddingService):
 
 class LocalEmbeddingService(BaseEmbeddingService):
     def __init__(self):
+        print("EMB-1 Entrando a LocalEmbeddingService")
+
         from sentence_transformers import SentenceTransformer
-        self.model_name      = settings.EMBEDDING_MODEL
-        self.is_bge          = self.model_name in _BGE_MODELS
-        self.model           = SentenceTransformer(self.model_name)
-        self.vector_dimension = self.model.get_sentence_embedding_dimension()
+
+        print("EMB-2 SentenceTransformer importado")
+
+        self.model_name = settings.EMBEDDING_MODEL
+
+        print(f"EMB-3 Modelo configurado: {self.model_name}")
+
+        self.is_bge = self.model_name in _BGE_MODELS
+
+        print("EMB-4 Antes de cargar modelo")
+
+        self.model = SentenceTransformer(self.model_name)
+
+        print("EMB-5 Modelo cargado")
+
+        # Fix: use get_embedding_dimension() to avoid FutureWarning
+        if hasattr(self.model, "get_embedding_dimension"):
+            self.vector_dimension = self.model.get_embedding_dimension()
+        else:
+            self.vector_dimension = self.model.get_sentence_embedding_dimension()
+
+        print(f"EMB-6 Dimensión detectada: {self.vector_dimension}")
+
         logger.info(
             "Embeddings → local / %s (BGE=%s, dim=%d)",
-            self.model_name, self.is_bge, self.vector_dimension,
+            self.model_name,
+            self.is_bge,
+            self.vector_dimension,
         )
 
     def _prepare(self, text: str, is_query: bool) -> str:
@@ -91,6 +114,14 @@ class LocalEmbeddingService(BaseEmbeddingService):
         return await self.embed(text, is_query=False)
 
     async def embed_batch(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
+        """Async version — use with 'await' in async contexts."""
+        return self._encode_batch(texts, is_query)
+
+    def embed_batch_sync(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
+        """Sync version — use this in ingest.py or any non-async context."""
+        return self._encode_batch(texts, is_query)
+
+    def _encode_batch(self, texts: List[str], is_query: bool) -> List[List[float]]:
         processed = [self._prepare(t, is_query) for t in texts]
         embeddings = self.model.encode(
             processed,

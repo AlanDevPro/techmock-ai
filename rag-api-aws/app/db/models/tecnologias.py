@@ -46,7 +46,12 @@ class NivelDificultad(Base):
     __tablename__ = "niveles_dificultad"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    nombre: Mapped[str] = mapped_column(String(30), nullable=False)
+    nombre: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        unique=True,
+        index=True
+    )
     descripcion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     multiplicador_puntaje: Mapped[float] = mapped_column(Numeric(3, 2), default=1.0)
 

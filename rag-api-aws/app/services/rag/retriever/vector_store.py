@@ -8,7 +8,7 @@ Se instancia UNA sola vez en el arranque de la app (app.state.vector_store).
 import logging
 from typing import Optional
 
-from opensearchpy import AsyncOpenSearch
+from opensearchpy import OpenSearch
 
 from app.services.rag.embeddings.service import get_embedding_service
 from app.core.config import settings
@@ -28,7 +28,7 @@ class VectorStoreRetriever:
     """
 
     def __init__(self):
-        self.client: Optional[AsyncOpenSearch] = None
+        self.client: Optional[OpenSearch] = None
         self.index = settings.OPENSEARCH_INDEX
         self.embedding_service = None
         self._is_connected = False
@@ -41,14 +41,14 @@ class VectorStoreRetriever:
         try:
             self.embedding_service = get_embedding_service()
 
-            self.client = AsyncOpenSearch(
+            self.client = OpenSearch(
                 hosts=[settings.OPENSEARCH_URL],
                 use_ssl=False,
                 verify_certs=False,
                 timeout=30,
             )
 
-            info = await self.client.info()
+            info = self.client.info()
             self._is_connected = True
             logger.info(
                 "✅ OpenSearch conectado — versión %s | índice: %s",
@@ -61,29 +61,37 @@ class VectorStoreRetriever:
             raise
 
     async def health_check(self) -> dict:
+        """Verifica el estado de la conexión a OpenSearch."""
         if not self._is_connected or not self.client:
             return {"status": "disconnected", "ready": False}
 
         try:
-            info = await self.client.info()
+            info = self.client.info()
             return {
-                "status":              "healthy",
-                "ready":               True,
-                "opensearch_version":  info.get("version", {}).get("number"),
-                "index":               self.index,
+                "status": "healthy",
+                "ready": True,
+                "opensearch_version": info.get("version", {}).get("number"),
+                "index": self.index,
             }
         except Exception as exc:
             return {"status": "unhealthy", "ready": False, "error": str(exc)}
 
-    async def buscar(
+    def buscar(
         self,
         query: str,
         framework: Optional[str] = None,
-        top_k: int = 5,
+        #top_k: int = 5,
+        top_k: int = 1,
         min_score: float = 0.0,
     ) -> str:
         """
         Busca fragmentos relevantes y retorna texto formateado para el prompt.
+
+        Args:
+            query: Texto de búsqueda
+            framework: Filtro opcional por framework
+            top_k: Número de resultados a retornar
+            min_score: Puntuación mínima (opcional)
 
         Returns:
             String con los fragmentos concatenados o "" si no hay resultados.
@@ -96,7 +104,21 @@ class VectorStoreRetriever:
             return ""
 
         try:
-            query_vector = await self.embedding_service.embed(query)
+            # Nota: embed es asíncrono, necesitas manejar esto
+            # Opción 1: Si get_embedding_service() devuelve async, usar asyncio.run()
+            # Opción 2: Hacer que buscar sea async (ver nota al final)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                # Si ya estamos en un loop async, necesitamos manejo especial
+                query_vector = asyncio.run_coroutine_threadsafe(
+                    self.embedding_service.embed(query), 
+                    loop
+                ).result()
+            except RuntimeError:
+                # No hay loop corriendo, podemos crear uno nuevo
+                query_vector = asyncio.run(self.embedding_service.embed(query))
+            
             if not query_vector:
                 return ""
 
@@ -107,7 +129,7 @@ class VectorStoreRetriever:
                 min_score=min_score,
             )
 
-            response = await self.client.search(index=self.index, body=knn_query)
+            response = self.client.search(index=self.index, body=knn_query)
             hits = response.get("hits", {}).get("hits", [])
             total = response.get("hits", {}).get("total", {}).get("value", 0)
 
@@ -123,24 +145,38 @@ class VectorStoreRetriever:
         self,
         query: str,
         framework: Optional[str] = None,
-        top_k: int = 5,
+        #top_k: int = 5,
+        top_k: int = 3,
     ) -> list[dict]:
         """Retorna resultados crudos para debug."""
         if not self._is_connected or not self.client:
             return []
 
         try:
-            query_vector = await self.embedding_service.embed(query)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                query_vector = asyncio.run_coroutine_threadsafe(
+                    self.embedding_service.embed(query), 
+                    loop
+                ).result()
+            except RuntimeError:
+                #query_vector = asyncio.run(self.embedding_service.embed(query))
+                query_vector = await self.embedding_service.embed(query)
+                
+            if not query_vector:
+                return []
+                
             knn_query = self._build_knn_query(query_vector, framework, top_k)
-            response = await self.client.search(index=self.index, body=knn_query)
+            response = self.client.search(index=self.index, body=knn_query)
 
             return [
                 {
-                    "score":     hit.get("_score"),
-                    "content":   hit.get("_source", {}).get("content"),
-                    "source":    hit.get("_source", {}).get("source"),
+                    "score": hit.get("_score"),
+                    "content": hit.get("_source", {}).get("content"),
+                    "source": hit.get("_source", {}).get("source"),
                     "framework": hit.get("_source", {}).get("framework"),
-                    "chunk_id":  hit.get("_source", {}).get("chunk_id"),
+                    "chunk_id": hit.get("_source", {}).get("chunk_id"),
                 }
                 for hit in response.get("hits", {}).get("hits", [])
             ]
@@ -156,6 +192,7 @@ class VectorStoreRetriever:
         top_k: int,
         min_score: float = 0.0,
     ) -> dict:
+        """Construye la query k-NN para OpenSearch."""
         knn_config: dict = {"embedding": {"vector": vector, "k": top_k}}
         if min_score > 0:
             knn_config["embedding"]["min_score"] = min_score
@@ -169,7 +206,7 @@ class VectorStoreRetriever:
         if framework:
             query["query"] = {
                 "bool": {
-                    "must":   [{"knn": knn_config}],
+                    "must": [{"knn": knn_config}],
                     "filter": [{"term": {"framework": framework.lower()}}],
                 }
             }
@@ -177,17 +214,21 @@ class VectorStoreRetriever:
         return query
 
     def _format_context(self, hits: list) -> str:
+        """Formatea los resultados para el prompt del LLM."""
         fragments = []
         for idx, hit in enumerate(hits, 1):
-            src     = hit.get("_source", {})
+            src = hit.get("_source", {})
             content = src.get("content", "").strip()
             if not content:
                 continue
 
             parts = [f"Fragmento {idx}"]
-            if src.get("title"):    parts.append(f"📄 {src['title']}")
-            if src.get("framework"): parts.append(f"🔧 {src['framework']}")
-            if src.get("source"):   parts.append(f"📁 {src['source']}")
+            if src.get("title"):
+                parts.append(f"📄 {src['title']}")
+            if src.get("framework"):
+                parts.append(f"🔧 {src['framework']}")
+            if src.get("source"):
+                parts.append(f"📁 {src['source']}")
 
             fragments.append(
                 f"[{' | '.join(parts)} | Relevancia: {hit.get('_score', 0):.3f}]\n{content}"
@@ -195,8 +236,9 @@ class VectorStoreRetriever:
 
         return ("\n\n" + "─" * 60 + "\n\n").join(fragments) if fragments else ""
 
-    async def close(self) -> None:
+    def close(self) -> None:
+        """Cierra la conexión con OpenSearch."""
         if self.client:
-            await self.client.close()
+            self.client.close()
             self._is_connected = False
             logger.info("🔌 Conexión con OpenSearch cerrada")

@@ -61,8 +61,8 @@ class Settings(BaseSettings):
 
     # ── Embeddings ────────────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = Field(
-        "openai",
-        description="Proveedor de embeddings: openai | huggingface | cohere",
+        "local",
+        description="Proveedor de embeddings: openai | huggingface | cohere | local | bedrock",
     )
     EMBEDDING_MODEL: str = Field(
         "text-embedding-3-small",
@@ -151,9 +151,19 @@ class Settings(BaseSettings):
     @field_validator("EMBEDDING_PROVIDER")
     @classmethod
     def validar_embedding_provider(cls, v: str) -> str:
-        opciones = {"openai", "huggingface", "cohere"}
+        opciones = {
+            "openai",
+            "huggingface",
+            "cohere",
+            "local",
+            "bedrock"
+        }
+
         if v not in opciones:
-            raise ValueError(f"EMBEDDING_PROVIDER debe ser uno de {opciones}, se recibió: '{v}'")
+            raise ValueError(
+                f"EMBEDDING_PROVIDER debe ser uno de {opciones}, se recibió: '{v}'"
+            )
+
         return v
 
     # ── Utilidades ────────────────────────────────────────────────────────

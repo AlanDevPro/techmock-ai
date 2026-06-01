@@ -17,11 +17,11 @@ import asyncio
 import argparse
 import re
 from pathlib import Path
-from opensearchpy import AsyncOpenSearch
+from opensearchpy import OpenSearch
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.services.embeddings.service import get_embedding_service
+from app.services.rag.embeddings.service import get_embedding_service
 from app.core.config import settings
 
 DOCS_DIR = Path(__file__).parent / "docs"
@@ -38,7 +38,7 @@ FRAMEWORKS = {
 embedding_service = get_embedding_service()
 
 
-async def crear_indice(client: AsyncOpenSearch):
+def crear_indice(client: OpenSearch):
     """Crea el índice k-NN en OpenSearch si no existe."""
     dim = embedding_service.vector_dimension
 
@@ -46,7 +46,8 @@ async def crear_indice(client: AsyncOpenSearch):
         "settings": {
             "index": {
                 "knn": True,
-                "knn.algo_param.ef_search": 512,
+                #"knn.algo_param.ef_search": 512,
+                "knn.algo_param.ef_search": 8,
             }
         },
         "mappings": {
@@ -68,9 +69,9 @@ async def crear_indice(client: AsyncOpenSearch):
         },
     }
 
-    exists = await client.indices.exists(index=settings.OPENSEARCH_INDEX)
+    exists = client.indices.exists(index=settings.OPENSEARCH_INDEX)
     if not exists:
-        await client.indices.create(index=settings.OPENSEARCH_INDEX, body=index_body)
+        client.indices.create(index=settings.OPENSEARCH_INDEX, body=index_body)
         print(f"✅ Índice '{settings.OPENSEARCH_INDEX}' creado (dim={dim})")
     else:
         print(f"ℹ️  Índice '{settings.OPENSEARCH_INDEX}' ya existe")
@@ -112,7 +113,7 @@ def chunk_markdown(text: str, chunk_size: int = 500, overlap: int = 50) -> list[
     return [c for c in chunks if len(c.strip()) > 50]  # Ignorar chunks muy cortos
 
 
-async def ingestar_framework(client: AsyncOpenSearch, framework_key: str):
+def ingestar_framework(client: OpenSearch, framework_key: str):
     """Indexa todos los documentos de un framework específico."""
     if framework_key not in FRAMEWORKS:
         print(f"❌ Framework desconocido: {framework_key}")
@@ -134,7 +135,7 @@ async def ingestar_framework(client: AsyncOpenSearch, framework_key: str):
 
     # Generar embeddings en batch (eficiente)
     print("   🧠 Generando embeddings...")
-    vectors = await embedding_service.embed_batch(chunks)
+    vectors = embedding_service.embed_batch_sync(chunks)
 
     # Indexar en OpenSearch
     print("   📤 Indexando en OpenSearch...")
@@ -143,7 +144,7 @@ async def ingestar_framework(client: AsyncOpenSearch, framework_key: str):
     for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
         doc_id = f"{framework_key}-{i:04d}"
 
-        await client.index(
+        client.index(
             index=settings.OPENSEARCH_INDEX,
             id=doc_id,
             body={
@@ -159,32 +160,32 @@ async def ingestar_framework(client: AsyncOpenSearch, framework_key: str):
     print(f"   ✅ {indexed} fragmentos indexados para {framework_nombre}")
 
 
-async def main():
+def main():
     parser = argparse.ArgumentParser(description="Pipeline de ingestion RAG")
     parser.add_argument("--framework", help="Framework a ingestar (vue/next/react/...)")
     parser.add_argument("--all",       action="store_true", help="Ingestar todos los frameworks")
     args = parser.parse_args()
 
-    client = AsyncOpenSearch(
+    client = OpenSearch(
         hosts=[settings.OPENSEARCH_URL],
         use_ssl=False,
         verify_certs=False,
     )
 
     try:
-        await crear_indice(client)
+        crear_indice(client)
 
         if args.all:
             for fw_key in FRAMEWORKS:
-                await ingestar_framework(client, fw_key)
+                ingestar_framework(client, fw_key)
         elif args.framework:
-            await ingestar_framework(client, args.framework)
+            ingestar_framework(client, args.framework)
         else:
             print("Usa --framework <nombre> o --all")
             print(f"Frameworks disponibles: {list(FRAMEWORKS.keys())}")
 
     finally:
-        await client.close()
+        client.close()
 
     print("\n🎉 Ingestion completada")
 
