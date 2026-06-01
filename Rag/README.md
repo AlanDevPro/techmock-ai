@@ -71,48 +71,7 @@ El modelo de inferencia responderá a la solicitud y generará un esquema JSON f
 
 
 
-Rag/
-├── .env                          # 🟢 NUEVO - variables de entorno
-├── .env.example                  # 🟢 NUEVO - plantilla pública
-├── README.md
-├── requirements.txt              # 🟡 MODIFICAR
-├── run.py
-├── alembic.ini                   # 🟢 NUEVO - migraciones de DB
-│
-├── alembic/                      # 🟢 NUEVO - carpeta de migraciones
-│   ├── env.py
-│   └── versions/
-│
-└── app/
-    ├── main.py                   # 🟡 MODIFICAR - agregar lifespan/startup
-    │
-    ├── api/
-    │   ├── __init__.py
-    │   ├── endpoints.py          # 🟡 MODIFICAR - inyectar DB session
-    │   └── deps.py               # 🟢 NUEVO - get_db() como dependencia
-    │
-    ├── core/
-    │   ├── config.py             # 🟢 NUEVO - Settings con pydantic-settings
-    │   └── prompts.py            # ✅ sin cambios
-    │
-    ├── db/                       # 🟢 NUEVO - carpeta completa
-    │   ├── __init__.py
-    │   ├── database.py           # engine async, SessionLocal
-    │   ├── models.py             # tablas ORM (preguntas, sesiones, evaluaciones)
-    │   └── repositories.py      # funciones CRUD
-    │
-    ├── schemas/
-    │   ├── __init__.py
-    │   └── evaluations.py        # 🟡 MODIFICAR - agregar sesion_id
-    │
-    ├── services/
-    │   ├── __init__.py
-    │   └── llm_service.py        # ✅ sin cambios
-    │
-    ├── models/                   # (si tenés modelos Pydantic separados)
-    └── data/
-        ├── vue_context.txt       # ✅ sin cambios
-        └── next_context.txt      # ✅ sin cambios
+
 
 
 
