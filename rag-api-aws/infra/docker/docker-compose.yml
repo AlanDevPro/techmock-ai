@@ -1,48 +1,17 @@
+version: "3.9"
+
 services:
 
   api:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-
-    container_name: rag-api
-
+    image: rag-api:latest
     ports:
       - "8000:8000"
-
-    env_file:
-      - ../../.env
-
-    depends_on:
-      - opensearch
-
-    volumes:
-      - ../../:/app
-
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - ENV=production
+      - OPENSEARCH_URL=http://opensearch:9200
 
   opensearch:
     image: opensearchproject/opensearch:2.11.1
-
-    container_name: opensearch
-
     environment:
       - discovery.type=single-node
       - plugins.security.disabled=true
-      - bootstrap.memory_lock=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-
-    ports:
-      - "9200:9200"
-      - "9600:9600"
-
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-
-volumes:
-  opensearch-data:

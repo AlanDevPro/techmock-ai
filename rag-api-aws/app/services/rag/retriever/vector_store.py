@@ -76,69 +76,85 @@ class VectorStoreRetriever:
         except Exception as exc:
             return {"status": "unhealthy", "ready": False, "error": str(exc)}
 
-    def buscar(
+    async def buscar(
         self,
         query: str,
         framework: Optional[str] = None,
-        #top_k: int = 5,
         top_k: int = 1,
         min_score: float = 0.0,
     ) -> str:
-        """
-        Busca fragmentos relevantes y retorna texto formateado para el prompt.
-
-        Args:
-            query: Texto de búsqueda
-            framework: Filtro opcional por framework
-            top_k: Número de resultados a retornar
-            min_score: Puntuación mínima (opcional)
-
-        Returns:
-            String con los fragmentos concatenados o "" si no hay resultados.
-        """
+    
         if not self._is_connected or not self.client:
-            logger.warning("Retriever no conectado — retornando contexto vacío")
+            logger.warning(
+                "Retriever no conectado — retornando contexto vacío"
+            )
             return ""
-
+    
         if not query or not query.strip():
             return ""
-
+    
         try:
-            # Nota: embed es asíncrono, necesitas manejar esto
-            # Opción 1: Si get_embedding_service() devuelve async, usar asyncio.run()
-            # Opción 2: Hacer que buscar sea async (ver nota al final)
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                # Si ya estamos en un loop async, necesitamos manejo especial
-                query_vector = asyncio.run_coroutine_threadsafe(
-                    self.embedding_service.embed(query), 
-                    loop
-                ).result()
-            except RuntimeError:
-                # No hay loop corriendo, podemos crear uno nuevo
-                query_vector = asyncio.run(self.embedding_service.embed(query))
-            
+        
+            print("EMBEDDING INICIO")
+    
+            query_vector = await self.embedding_service.embed(
+                query
+            )
+    
+            print("EMBEDDING FIN")
+    
             if not query_vector:
                 return ""
-
+    
             knn_query = self._build_knn_query(
                 vector=query_vector,
                 framework=framework,
                 top_k=top_k,
                 min_score=min_score,
             )
-
-            response = self.client.search(index=self.index, body=knn_query)
-            hits = response.get("hits", {}).get("hits", [])
-            total = response.get("hits", {}).get("total", {}).get("value", 0)
-
-            logger.debug("Búsqueda RAG: %d total, %d devueltos", total, len(hits))
-
-            return self._format_context(hits) if hits else ""
-
+    
+            print("OPENSEARCH INICIO")
+    
+            response = self.client.search(
+                index=self.index,
+                body=knn_query
+            )
+    
+            print("OPENSEARCH FIN")
+    
+            hits = response.get(
+                "hits",
+                {}
+            ).get(
+                "hits",
+                []
+            )
+    
+            total = response.get(
+                "hits",
+                {}
+            ).get(
+                "total",
+                {}
+            ).get(
+                "value",
+                0
+            )
+    
+            logger.debug(
+                "Búsqueda RAG: %d total, %d devueltos",
+                total,
+                len(hits),
+            )
+    
+            return self._format_context(
+                hits
+            ) if hits else ""
+    
         except Exception as exc:
-            logger.error("Error en búsqueda semántica: %s", exc)
+            logger.exception(
+                "Error en búsqueda semántica"
+            )
             return ""
 
     async def buscar_raw(
@@ -146,7 +162,7 @@ class VectorStoreRetriever:
         query: str,
         framework: Optional[str] = None,
         #top_k: int = 5,
-        top_k: int = 3,
+        top_k: int = 1,
     ) -> list[dict]:
         """Retorna resultados crudos para debug."""
         if not self._is_connected or not self.client:

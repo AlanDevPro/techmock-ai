@@ -135,11 +135,16 @@ register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:4000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],   # 👈 importante
     allow_headers=["*"],
-    expose_headers=["X-Session-Id", "X-Request-ID", "X-Response-Time"],
 )
 
 # TrustedHostMiddleware solo en producción

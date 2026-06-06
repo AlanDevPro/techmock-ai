@@ -1,24 +1,18 @@
-import { env } from "@/config/env";
+import axios from "axios";
 
-class ApiError extends Error {
-  constructor(public status: number, path: string) {
-    super(`[${status}] ${path}`);
-    this.name = "ApiError";
+const apiClient = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_RAG_API_URL || "http://localhost:8000",
+});
+
+// 🔥 interceptor global de auth
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem("accessToken");
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-}
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${env.API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  return config;
+});
 
-  if (!res.ok) throw new ApiError(res.status, path);
-  return res.json() as Promise<T>;
-}
-
-export const apiClient = {
-  get:  <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: "POST", body: JSON.stringify(body) }),
-};
+export { apiClient };

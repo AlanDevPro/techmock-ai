@@ -63,9 +63,10 @@ class AnalyticsService:
 
         try:
             await db.flush()
+
             logger.debug(
-                "%d detalles técnicos guardados para evaluacion_id=%s",
-                len(evaluacion_tecnica), evaluacion_id,
+                "Detalles técnicos procesados para evaluacion_id=%s",
+                evaluacion_id,
             )
         except Exception as exc:
             logger.error("Error en flush de evaluación técnica: %s", exc)

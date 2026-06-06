@@ -6,6 +6,7 @@ que se guardan como columnas separadas en la tabla `evaluaciones`.
 """
 
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,24 @@ _PILARES = [
     "puntaje_comunicacion",
     "puntaje_resolucion",
 ]
+
+
+def _normalize_score(value: float) -> float:
+    """
+    Normaliza el puntaje a escala 0-100.
+    
+    Si el valor viene en escala 0-10, lo convierte a 0-100.
+    Si ya está en escala 0-100, lo mantiene.
+    """
+    # Si viene en escala 0-10, lo convertimos a 0-100
+    if value <= 10:
+        return value * 10
+    return value
+
+
+def _clamp(value: float, min_val: float = 0.0, max_val: float = 100.0) -> float:
+    """Limita el valor dentro del rango [min_val, max_val]"""
+    return max(min_val, min(max_val, value))
 
 
 class PilaresParser:
@@ -47,22 +66,17 @@ class PilaresParser:
             valor = pilares_raw.get(pilar)
             if valor is not None:
                 try:
-                    pilares[pilar] = _clamp(float(valor))
+                    # Normalizar y luego limitar al rango
+                    normalized = _normalize_score(float(valor))
+                    pilares[pilar] = _clamp(normalized)
                 except (ValueError, TypeError):
                     pilares[pilar] = None
             else:
-                # Fallback: usar el puntaje total si no hay desglose
-                pilares[pilar] = puntaje_total if puntaje_total > 0 else None
+                # NO inventar valores si el LLM no los envía
+                pilares[pilar] = None
 
         missing = [k for k, v in pilares.items() if v is None]
         if missing:
             logger.debug("Pilares sin valor del LLM: %s", missing)
 
         return pilares
-
-
-from typing import Optional
-
-
-def _clamp(value: float, min_val: float = 0.0, max_val: float = 100.0) -> float:
-    return max(min_val, min(max_val, value))

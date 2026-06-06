@@ -1,0 +1,64 @@
+# Entorno virtual
+venv/
+.venv/
+env/
+ENV/
+
+# Bytecode de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribución / empaquetado
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+*.log
+
+# Archivos de entorno
+.env
+.env.*
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Cachés de herramientas
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# VS Code / IDEs
+.vscode/
+.idea/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos temporales
+*.tmp
+*.bak
+
+# Datos o embeddings (si tu RAG los genera localmente)
+data/
+storage/
+chroma/
+faiss_index/
+*.pkl
+*.sqlite
+*.db
+
+
+# virtual environments
+venv/
+.venv/
+env/
+venv312/
+rag-api-aws/venv312/
+
+
+
+firebase-service-account.json

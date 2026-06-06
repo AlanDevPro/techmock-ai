@@ -200,28 +200,7 @@ export default function IDE() {
     return () => clearTimeout(timer);
   }, [isBooting]);
 
-  // Autosave cada 15 segundos si hay sesionId
-  useEffect(() => {
-    if (!sesionId || isBooting) return;
-
-    const interval = setInterval(async () => {
-      const codigo = fileSystem[activeFile];
-      if (!codigo || !codigo.trim()) return;
-
-      try {
-        await codeService.guardarBorrador({
-          sesion_id: sesionId,
-          codigo,
-          active_file: activeFile,
-        });
-        console.log("💾 Borrador guardado automáticamente");
-      } catch (err) {
-        console.warn("⚠️ Error en autosave (no bloquea):", err);
-      }
-    }, 15_000);
-
-    return () => clearInterval(interval);
-  }, [sesionId, isBooting, activeFile, fileSystem]);
+  
 
   // Redimensionamiento del preview
   useEffect(() => {
@@ -641,12 +620,7 @@ export default function IDE() {
                 <span className="text-[12px] text-red-400 font-semibold">✗ {submitMessage || "Error al analizar"}</span>
               )}
 
-              {/* Autosave indicator */}
-              {sesionId && submitStatus === null && (
-                <span className="text-[11px] opacity-50" style={{ color: "var(--text-secondary)" }}>
-                  💾 Autosave activo
-                </span>
-              )}
+              
 
               <button
                 onClick={handleSubmitCode}

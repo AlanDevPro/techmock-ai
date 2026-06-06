@@ -1,0 +1,38 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv312/
+.env
+
+# Git
+.git/
+.gitignore
+
+# Tests
+tests/
+
+# Local infra
+infra/
+
+# Docs
+README.md
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# Docker compose local
+docker-compose*.yml
+
+# IDE
+.vscode/
+.idea/
+
+# ingestion cache
+ingestion/__pycache__/

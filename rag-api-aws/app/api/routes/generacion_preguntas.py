@@ -4,11 +4,12 @@ app/api/routes/generacion_preguntas.py
 Endpoints de generación de preguntas técnicas de entrevista.
 
 ENDPOINTS:
-  GET /preguntas/generar/{framework}          → genera pregunta RAG para el framework
-  GET /preguntas/iniciar-sesion/{framework}   → crea sesión rápida sin generar pregunta (<100ms)
-  GET /preguntas/sesion/{sesion_id}/pregunta  → obtiene la pregunta activa de una sesión
+  GET /preguntas/generar/{framework}          → genera pregunta RAG para el framework (público)
+  GET /preguntas/iniciar-sesion/{framework}   → crea sesión rápida sin generar pregunta (requiere JWT)
+  GET /preguntas/sesion/{sesion_id}/pregunta  → obtiene la pregunta activa de una sesión (público)
 """
 
+from asyncio.log import logger
 import uuid
 from typing import Optional
 from uuid import UUID
@@ -16,9 +17,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_user_id
+from app.api.deps import get_db, require_current_user_id
 from app.core.config import settings
-from app.schemas.preguntas import RespuestaPregunta, SesionIniciadaResponse
+from app.schemas.preguntas import RespuestaPregunta, SesionCreadaResponse
 from app.services.generacion.pregunta_service import PreguntaService
 from app.db.repositories import sesiones_repo, tecnologias_repo
 
@@ -40,33 +41,34 @@ FRAMEWORK_MAP: dict[str, str] = {
 
 
 def _normalizar_framework(framework_raw: str) -> Optional[str]:
+    """Normaliza el nombre del framework desde el slug de URL."""
     return FRAMEWORK_MAP.get(framework_raw.strip().lower())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /preguntas/generar/{framework}
+# 🟢 GET /preguntas/generar/{framework} - PÚBLICO (SIN JWT)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/generar/{framework}",
     response_model=RespuestaPregunta,
     summary="Genera una pregunta técnica de entrevista via RAG",
+    description="Endpoint público. No requiere autenticación JWT.",
 )
 async def generar_pregunta(
     framework: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    usuario_id: Optional[UUID] = Depends(get_current_user_id),
 ):
+    logger.warning("🔥 HIT generar pregunta | framework=%s", framework)
     """
     Genera una pregunta técnica contextualizada para el framework indicado.
 
     Flujo interno:
       1. Normaliza el framework (vuejs → Vue.js)
-      2. Consulta debilidades del usuario si está autenticado (sistema adaptativo)
-      3. RAG recupera fragmentos de documentación relevantes
-      4. LLM genera pregunta contextualizada y no repetitiva
-      5. Persiste pregunta + sesión en BD
+      2. RAG recupera fragmentos de documentación relevantes
+      3. LLM genera pregunta contextualizada y no repetitiva
+      4. Persiste pregunta + sesión en BD (usuario_id = None para anónimo)
 
     Ejemplos:
       GET /preguntas/generar/vue
@@ -86,25 +88,26 @@ async def generar_pregunta(
     service = PreguntaService(db=db, request=request)
     resultado = await service.generar_y_persistir(
         framework=framework_nombre,
-        usuario_id=usuario_id,
+        usuario_id=None,  # 🔓 Público: sin tracking de usuario
     )
     return resultado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /preguntas/iniciar-sesion/{framework}
+# 🔐 GET /preguntas/iniciar-sesion/{framework} - PRIVADO (CON JWT)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/iniciar-sesion/{framework}",
-    response_model=SesionIniciadaResponse,
+    response_model=SesionCreadaResponse,
     summary="Crea una sesión vacía sin generar pregunta (respuesta < 100ms)",
+    description="Endpoint privado. Requiere autenticación JWT para tracking de usuario.",
 )
 async def iniciar_sesion_rapida(
     framework: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    usuario_id: Optional[UUID] = Depends(get_current_user_id),
+    usuario_id: UUID = Depends(require_current_user_id),  # 🔒 Autenticación requerida
 ):
     """
     Crea la sesión en BD con una pregunta placeholder.
@@ -123,19 +126,20 @@ async def iniciar_sesion_rapida(
     service = PreguntaService(db=db, request=request)
     resultado = await service.iniciar_sesion_rapida(
         framework=framework_nombre,
-        usuario_id=usuario_id,
+        usuario_id=usuario_id,  # 🔒 Tracking del usuario autenticado
     )
     return resultado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /preguntas/sesion/{sesion_id}/pregunta
+# 🟢 GET /preguntas/sesion/{sesion_id}/pregunta - PÚBLICO (SIN JWT)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
     "/sesion/{sesion_id}/pregunta",
     response_model=RespuestaPregunta,
     summary="Obtiene la pregunta activa de una sesión existente",
+    description="Endpoint público. No requiere autenticación.",
 )
 async def obtener_pregunta_sesion(
     sesion_id: str,

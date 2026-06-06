@@ -36,7 +36,7 @@ async def crear_sesion(
         tecnologia_id=tecnologia_id,
         nivel_id=nivel_id,
         pregunta_id=pregunta_id,
-        estado="en_progreso",
+        estado="pendiente_pregunta",
         fue_adaptativa=fue_adaptativa,
         sesion_anterior_id=sesion_anterior_id,
         ip_usuario=ip_usuario,
@@ -50,11 +50,14 @@ async def crear_sesion(
     return sesion
 
 
-async def get_sesion_por_id(
-    db: AsyncSession, sesion_id: UUID
-) -> Optional[SesionEntrevista]:
+async def get_sesion_por_id(db: AsyncSession, sesion_id: UUID):
     result = await db.execute(
-        select(SesionEntrevista).where(SesionEntrevista.id == sesion_id)
+        select(SesionEntrevista)
+        .options(
+            selectinload(SesionEntrevista.evaluacion),
+            selectinload(SesionEntrevista.errores_detectados),
+        )
+        .where(SesionEntrevista.id == sesion_id)
     )
     return result.scalar_one_or_none()
 
@@ -122,13 +125,57 @@ async def get_sesiones_recientes_usuario(
     return list(result.scalars().all())
 
 
-async def finalizar_sesion(db: AsyncSession, sesion_id: UUID) -> None:
-    await db.execute(
+_ESTADOS_FINALES = {"completada", "tiempo_agotado"}
+
+
+async def finalizar_sesion(
+    db: AsyncSession,
+    sesion_id: UUID,
+    estado: str = "completada",
+) -> bool:
+    """
+    Finaliza sesión de forma idempotente y atómica.
+
+    Returns:
+        True  -> si realmente se actualizó
+        False -> si ya estaba finalizada (no hace nada)
+    """
+
+    result = await db.execute(
         update(SesionEntrevista)
-        .where(SesionEntrevista.id == sesion_id)
+        .where(
+            SesionEntrevista.id == sesion_id,
+            SesionEntrevista.estado.notin_(_ESTADOS_FINALES)  # 🔒 LOCK LÓGICO
+        )
         .values(
-            estado="completada",
+            estado=estado,
             fecha_fin=datetime.now(timezone.utc),
         )
     )
-    logger.debug("Sesión finalizada: %s", sesion_id)
+
+    await db.flush()
+
+    return result.rowcount > 0
+
+
+
+async def iniciar_sesion(
+    db,
+    sesion_id,
+    pregunta_id
+):
+
+    sesion = await db.get(
+        SesionEntrevista,
+        sesion_id
+    )
+
+    sesion.estado = "en_progreso"
+
+    sesion.fecha_inicio = datetime.utcnow()
+
+    sesion.pregunta_id = pregunta_id
+
+    await db.flush()
+
+    return sesion

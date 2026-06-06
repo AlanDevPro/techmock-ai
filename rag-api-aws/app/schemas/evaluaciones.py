@@ -9,7 +9,7 @@ Cubre:
   - GET  /sesion/{id}/analisis
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -386,3 +386,12 @@ class RespuestaAnalisisBorrador(BaseModel):
                 "fuentes_rag": [],
             }
         }
+
+
+class SolicitudFinalizarCodigo(BaseModel):
+    sesion_id:     str
+    codigo:        str
+    lenguaje:      str
+    motivo_cierre: Literal["enviado", "tiempo_agotado"] = "enviado"
+    active_file:   Optional[str] = None
+    files:         Optional[dict[str, str]] = None

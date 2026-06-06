@@ -124,3 +124,54 @@ rag-api-aws/
 ├── .env.example
 ├── requirements.txt
 └── main.py                                 ← FastAPI app, incluye los 4 routers
+
+
+
+
+
+
+
+rag-api-aws/
+│
+├── app/
+│   ├── api/
+│   ├── core/
+│   ├── db/
+│   ├── schemas/
+│   ├── services/
+│   └── main.py
+│
+├── ingestion/
+│
+├── migrations/
+│
+├── tests/
+│
+├── infra/                          ← 🔥 NUEVO (CAPA DE INFRA COMPLETA)
+│   │
+│   ├── docker/                     ← desarrollo local
+│   │   ├── docker-compose.dev.yml
+│   │   └── docker-compose.yml
+│   │
+│   ├── aws/                        ← PRODUCCIÓN AWS
+│   │   ├── ecs/
+│   │   │   ├── task-definition.json
+│   │   │   └── service.json
+│   │   │
+│   │   ├── ecr/
+│   │   │   └── build-push.sh
+│   │   │
+│   │   ├── rds/
+│   │   │   └── init.sql (opcional)
+│   │   │
+│   │   └── opensearch/
+│   │       └── policy.json
+│   │
+│   └── scripts/
+│       ├── deploy.sh
+│       └── ingest.sh
+│
+├── .env.example
+├── requirements.txt
+├── Dockerfile                      ← 🔥 PRODUCCIÓN FASTAPI
+└── README.md

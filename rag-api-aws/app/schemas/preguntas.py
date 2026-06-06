@@ -180,3 +180,13 @@ class SesionIniciadaResponse(BaseModel):
                 "categorias_error_objetivo": [],
             }
         }
+
+class SesionCreadaResponse(BaseModel):
+
+    sesion_id: UUID
+    tecnologia_id: int
+    nivel_id: int
+
+    estado: str
+
+    tiempo_limite_segundos: int = 3600

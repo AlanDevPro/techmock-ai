@@ -85,6 +85,7 @@ class LocalEmbeddingService(BaseEmbeddingService):
         print("EMB-4 Antes de cargar modelo")
 
         self.model = SentenceTransformer(self.model_name)
+        print(self.model.device)
 
         print("EMB-5 Modelo cargado")
 

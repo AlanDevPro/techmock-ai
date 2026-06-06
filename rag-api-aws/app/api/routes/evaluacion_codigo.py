@@ -1,36 +1,34 @@
 """
 app/api/routes/evaluacion_codigo.py
 
-Endpoints de evaluación y análisis de código del candidato.
+ARQUITECTURA DE SEGURIDAD:
+  - JWT solo en login y creación de sesión (asocia usuario_id ↔ sesion_id en BD)
+  - POST /finalizar  → público, usuario_id se resuelve desde sesion.usuario_id en BD
+  - GET  /resultado  → público, cualquiera con sesion_id puede ver (debug/admin)
+  - GET  /analisis   → público, cualquiera con sesion_id puede ver (frontend)
 
-ENDPOINTS:
-  POST /codigo/analizar              → analiza código con RAG + LLM, persiste resultado
-  POST /codigo/borrador              → autosave del editor (no bloqueante)
-  GET  /codigo/sesion/{id}/resultado → resultado crudo (debug/admin)
-  GET  /codigo/sesion/{id}/analisis  → análisis formateado para el frontend
+  El control de acceso real está en la BD: la sesión YA tiene usuario_id
+  desde el momento en que se creó con JWT. No hace falta re-validar aquí.
 """
 
-import uuid
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_current_user_id
+from app.api.deps import get_db
 from app.core.config import settings
 from app.core.normalizers import construir_contexto_proyecto
 from app.schemas.evaluaciones import (
     RespuestaAnalisisCodigo,
-    SolicitudAnalisisCodigo,
-    RespuestaAutosave,
+    SolicitudFinalizarCodigo,
 )
 from app.services.evaluacion.codigo_service import CodigoService
-from app.db.repositories import sesiones_repo, evaluaciones_repo, codigo_repo
+from app.db.repositories import sesiones_repo
 
 router = APIRouter(prefix="/codigo", tags=["Evaluación de Código"])
 
-# Mapeo slug URL → nombre canónico (igual que en generacion_preguntas)
+# Mapeo slug URL → nombre canónico
 FRAMEWORK_MAP: dict[str, str] = {
     "vue":        "Vue.js",
     "vuejs":      "Vue.js",
@@ -46,21 +44,10 @@ FRAMEWORK_MAP: dict[str, str] = {
 
 
 def _normalizar_framework(framework_raw: str) -> str:
-    """Normaliza o retorna el valor original si no está en el mapa."""
     return FRAMEWORK_MAP.get(framework_raw.strip().lower(), framework_raw.strip())
 
 
-def _puntaje_a_nivel_candidato(puntaje: float) -> str:
-    """Convierte puntaje 0-100 al nivel de candidato del esquema de BD."""
-    if puntaje >= 90: return "destacado"
-    if puntaje >= 75: return "recomendado"
-    if puntaje >= 60: return "promisorio"
-    if puntaje >= 40: return "revisar"
-    return "descartado"
-
-
 def _puntaje_a_nivel_texto(puntaje: float) -> str:
-    """Versión legible del nivel para el frontend."""
     if puntaje >= 90: return "Excelente"
     if puntaje >= 75: return "Bueno"
     if puntaje >= 60: return "Regular"
@@ -69,38 +56,45 @@ def _puntaje_a_nivel_texto(puntaje: float) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /codigo/analizar
+# POST /codigo/finalizar  ← SIN JWT
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post(
-    "/analizar",
+    "/finalizar",
     response_model=RespuestaAnalisisCodigo,
-    summary="Analiza el código del candidato con RAG + LLM",
+    summary="Finaliza la sesión: guarda el código, evalúa con IA y persiste todo",
 )
-async def analizar_codigo(
-    data: SolicitudAnalisisCodigo,
+async def finalizar_codigo(
+    data: SolicitudFinalizarCodigo,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    usuario_id: Optional[UUID] = Depends(get_current_user_id),
+    # ← SIN require_current_user_id. usuario_id viene de sesion.usuario_id en BD.
 ):
     """
-    Analiza el código enviado por el candidato.
+    Endpoint único de cierre de sesión. Se invoca cuando:
+    - El candidato presiona "Enviar solución", o
+    - El frontend detecta que el tiempo se agotó.
+
+    No requiere JWT. El usuario_id se obtiene de sesion.usuario_id en BD,
+    garantizando que la evaluación siempre queda asociada al dueño correcto.
 
     Flujo interno:
       1. Valida longitud del código
       2. Construye contexto multi-archivo del IDE
       3. RAG recupera fragmentos de buenas prácticas
       4. LLM evalúa el código y retorna los 5 pilares técnicos
-      5. Persiste evaluación completa en BD si hay sesion_id
-      6. Actualiza perfil técnico del usuario
+      5. Persiste código, evaluación, errores y recomendaciones en BD
+      6. Actualiza perfil técnico del usuario (desde sesion.usuario_id)
+      7. Marca la sesión como completada (o tiempo_agotado)
 
     Body esperado:
     {
-      "codigo":      "string requerido",
-      "framework":   "vue | react | next | typescript | ...",
-      "sesion_id":   "uuid opcional",
-      "active_file": "App.vue",
-      "files":       {"App.vue": "contenido", "store.js": "contenido"}
+      "sesion_id":     "uuid requerido",
+      "codigo":        "string requerido",
+      "lenguaje":      "vue | react | next | typescript | ...",
+      "motivo_cierre": "enviado | tiempo_agotado",
+      "active_file":   "App.vue",
+      "files":         {"App.vue": "...", "store.js": "..."}
     }
     """
     if len(data.codigo) > settings.MAX_CODIGO_LENGTH:
@@ -109,7 +103,7 @@ async def analizar_codigo(
             detail=f"Código excede el límite de {settings.MAX_CODIGO_LENGTH} caracteres.",
         )
 
-    framework = _normalizar_framework(data.framework)
+    framework = _normalizar_framework(data.lenguaje)
 
     contexto_proyecto = construir_contexto_proyecto(
         active_file=data.active_file or "",
@@ -118,72 +112,18 @@ async def analizar_codigo(
     )
 
     service = CodigoService(db=db, request=request)
-    resultado = await service.analizar_y_persistir(
+    return await service.finalizar_y_evaluar(
+        sesion_id=data.sesion_id,
         codigo=data.codigo,
         framework=framework,
         contexto_proyecto=contexto_proyecto,
-        sesion_id=data.sesion_id,
-        usuario_id=usuario_id,
+        motivo_cierre=data.motivo_cierre,
+        usuario_id=None,  # ← el service lo resuelve desde sesion.usuario_id en BD
     )
-    return resultado
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /codigo/borrador
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.post(
-    "/borrador",
-    response_model=RespuestaAutosave,
-    summary="Guarda un borrador del código (autosave del IDE)",
-)
-async def guardar_borrador(
-    data: dict,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Persiste un snapshot del código sin marcarlo como envío final.
-    No bloquea al IDE si falla — siempre retorna ok/not_ok.
-    """
-    sesion_id_str = data.get("sesion_id", "").strip()
-    codigo        = data.get("codigo", "").strip()
-    active_file   = data.get("active_file", "borrador")
-
-    if not sesion_id_str or not codigo:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="'sesion_id' y 'codigo' son requeridos.",
-        )
-
-    try:
-        sesion_id = UUID(sesion_id_str)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="sesion_id debe ser un UUID válido.",
-        )
-
-    try:
-        sesion = await sesiones_repo.get_sesion_por_id(db, sesion_id)
-        if not sesion:
-            return RespuestaAutosave(ok=False, detail="Sesión no encontrada.")
-
-        await codigo_repo.guardar_envio_codigo(
-            db=db,
-            sesion_id=sesion_id,
-            lenguaje=active_file,
-            codigo=codigo,
-            es_envio_final=False,
-        )
-        return RespuestaAutosave(ok=True)
-
-    except Exception as exc:
-        print(f"⚠️  Error autosave (no bloqueante): {exc}")
-        return RespuestaAutosave(ok=False, detail=str(exc))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /codigo/sesion/{sesion_id}/resultado
+# GET /codigo/sesion/{sesion_id}/resultado  ← SIN JWT (debug/admin)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
@@ -193,21 +133,17 @@ async def guardar_borrador(
 async def obtener_resultado_sesion(
     sesion_id: str,
     db: AsyncSession = Depends(get_db),
+    # ← SIN require_current_user_id.
 ):
     """
-    Retorna los datos crudos de BD de la sesión.
+    Retorna los datos crudos de BD.
+    Público: cualquiera con el sesion_id puede consultar.
     Usar solo para debug y panel de administración.
     El frontend debe usar GET /codigo/sesion/{id}/analisis en su lugar.
     """
-    try:
-        sesion_uuid = UUID(sesion_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="sesion_id debe ser un UUID válido.",
-        )
-
+    sesion_uuid = _parse_uuid(sesion_id)
     sesion = await sesiones_repo.get_sesion_con_detalles(db, sesion_uuid)
+
     if not sesion:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -217,7 +153,7 @@ async def obtener_resultado_sesion(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /codigo/sesion/{sesion_id}/analisis
+# GET /codigo/sesion/{sesion_id}/analisis  ← SIN JWT (frontend)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get(
@@ -228,27 +164,25 @@ async def obtener_resultado_sesion(
 async def obtener_analisis_sesion(
     sesion_id: str,
     db: AsyncSession = Depends(get_db),
+    # ← SIN require_current_user_id.
 ):
     """
     Transforma los datos de BD al contrato estable RespuestaAnalisisCodigo.
     Este es el endpoint que DEBE usar el frontend para mostrar resultados.
 
-    Incluye los 5 pilares técnicos almacenados en la tabla evaluaciones:
+    Público: el sesion_id actúa como token de acceso opaco (UUID v4).
+    El usuario_id ya está grabado en la sesión desde la creación con JWT.
+
+    Incluye los 5 pilares técnicos:
       - puntaje_javascript
       - puntaje_arquitectura
       - puntaje_buenas_practicas
       - puntaje_comunicacion
       - puntaje_resolucion
     """
-    try:
-        sesion_uuid = UUID(sesion_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="sesion_id debe ser un UUID válido.",
-        )
-
+    sesion_uuid = _parse_uuid(sesion_id)
     sesion = await sesiones_repo.get_sesion_con_detalles(db, sesion_uuid)
+
     if not sesion:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -256,49 +190,45 @@ async def obtener_analisis_sesion(
         )
 
     evaluacion = sesion.evaluacion
-    puntaje    = float(evaluacion.puntaje_total) if evaluacion and evaluacion.puntaje_total else 0.0
+    puntaje = float(evaluacion.puntaje_total) if evaluacion and evaluacion.puntaje_total else 0.0
 
-    # ── Errores detectados ────────────────────────────────────────────────
     errores = [
         {
-            "tipo":              e.categoria_error.nombre if e.categoria_error else "general",
-            "categoria_slug":    e.categoria_error.slug if e.categoria_error else None,
-            "descripcion":       e.descripcion,
-            "impacto":           e.severidad,
-            "es_conceptual":     e.es_error_conceptual,
-            "linea_aproximada":  e.linea_codigo,
-            "fragmento_codigo":  e.fragmento_codigo,
-            "codigo_corregido":  e.codigo_corregido,
-            "explicacion_ia":    e.explicacion_ia,
+            "tipo":             e.categoria_error.nombre if e.categoria_error else "general",
+            "categoria_slug":   e.categoria_error.slug if e.categoria_error else None,
+            "descripcion":      e.descripcion,
+            "impacto":          e.severidad,
+            "es_conceptual":    e.es_error_conceptual,
+            "linea_aproximada": e.linea_codigo,
+            "fragmento_codigo": e.fragmento_codigo,
+            "codigo_corregido": e.codigo_corregido,
+            "explicacion_ia":   e.explicacion_ia,
         }
         for e in (sesion.errores_detectados or [])
     ]
 
-    # ── Recomendaciones ───────────────────────────────────────────────────
     recomendaciones = []
     if evaluacion and evaluacion.recomendaciones:
         recomendaciones = sorted(
             [
                 {
-                    "tipo":          r.tipo,
-                    "mensaje":       r.titulo,
-                    "solucion":      r.descripcion,
+                    "tipo":           r.tipo,
+                    "mensaje":        r.titulo,
+                    "solucion":       r.descripcion,
                     "codigo_ejemplo": r.codigo_ejemplo,
-                    "recurso_url":   r.recurso_url,
+                    "recurso_url":    r.recurso_url,
                     "recurso_titulo": r.recurso_titulo,
-                    "prioridad":     r.prioridad,
-                    "orden":         r.orden,
+                    "prioridad":      r.prioridad,
+                    "orden":          r.orden,
                 }
                 for r in evaluacion.recomendaciones
             ],
             key=lambda x: x["orden"],
         )
 
-    # ── Fortalezas y áreas de mejora ──────────────────────────────────────
     fortalezas   = [f.strip() for f in (evaluacion.fortalezas or "").split("\n") if f.strip()]
     areas_mejora = [a.strip() for a in (evaluacion.areas_mejora or "").split("\n") if a.strip()]
 
-    # ── Pilares técnicos (columnas directas de evaluaciones) ──────────────
     pilares = {
         "javascript":       float(evaluacion.puntaje_javascript or 0),
         "arquitectura":     float(evaluacion.puntaje_arquitectura or 0),
@@ -307,7 +237,6 @@ async def obtener_analisis_sesion(
         "resolucion":       float(evaluacion.puntaje_resolucion or 0),
     } if evaluacion else {}
 
-    # ── Detalle por rúbrica (tabla detalle_evaluacion) ────────────────────
     detalle_rubricas = []
     if evaluacion and evaluacion.detalles:
         detalle_rubricas = [
@@ -321,11 +250,11 @@ async def obtener_analisis_sesion(
 
     return RespuestaAnalisisCodigo(
         calificacion_general={
-            "nivel":                _puntaje_a_nivel_texto(puntaje),
-            "nivel_candidato":      evaluacion.nivel_candidato if evaluacion else None,
-            "puntaje":              int(puntaje),
-            "apto_para_contratacion": evaluacion.apto_para_contratacion if evaluacion else None,
-            "resumen":              evaluacion.feedback_general if evaluacion else "Sin evaluación",
+            "nivel":                   _puntaje_a_nivel_texto(puntaje),
+            "nivel_candidato":         evaluacion.nivel_candidato if evaluacion else None,
+            "puntaje":                 int(puntaje),
+            "apto_para_contratacion":  evaluacion.apto_para_contratacion if evaluacion else None,
+            "resumen":                 evaluacion.feedback_general if evaluacion else "Sin evaluación",
             "resumen_para_reclutador": evaluacion.resumen_para_reclutador if evaluacion else None,
         },
         pilares_tecnicos=pilares,
@@ -335,3 +264,17 @@ async def obtener_analisis_sesion(
         recomendaciones=recomendaciones,
         detalle_rubricas=detalle_rubricas,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_uuid(value: str) -> UUID:
+    try:
+        return UUID(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sesion_id debe ser un UUID válido.",
+        )

@@ -96,6 +96,10 @@ class Settings(BaseSettings):
         "CHANGE_ME_IN_PRODUCTION",
         description="Clave secreta para firmar JWT y tokens internos",
     )
+    JWT_SECRET: str = Field(
+        "",
+        description="JWT secret compartido con backend auth"
+    )
     JWT_ALGORITHM: str = Field("HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60)
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(30)

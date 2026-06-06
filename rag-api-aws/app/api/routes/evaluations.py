@@ -459,7 +459,7 @@ async def _persistir_pregunta_y_sesion(
     sesion = None
     try:
         slug       = TECH_SLUGS.get(framework)
-        tecnologia = await repo.get_tecnologia_por_slug(db, slug)
+        tecnologia = await repo.get_tecnologia_por_nombre(db, slug)
         nivel      = await repo.get_nivel_por_nombre(db, NIVEL_DEFAULT)
 
         if not tecnologia or not nivel:

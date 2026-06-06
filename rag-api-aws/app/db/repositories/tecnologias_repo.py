@@ -48,3 +48,14 @@ async def listar_tecnologias_activas(db: AsyncSession) -> list[Tecnologia]:
         select(Tecnologia).where(Tecnologia.activo == True).order_by(Tecnologia.nombre)
     )
     return list(result.scalars().all())
+
+async def get_tecnologia_por_nombre(
+    db: AsyncSession,
+    nombre: str
+):
+    stmt = select(Tecnologia).where(
+        Tecnologia.nombre == nombre
+    )
+
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()

@@ -87,11 +87,11 @@ export default function IDEPage() {
       }
 
       const apiBase =
-        process.env.NEXT_PUBLIC_RAG_API_URL || 'http://localhost:8000/api/v1';
+        process.env.NEXT_PUBLIC_RAG_API_URL || 'http://localhost:8000';
 
       // ✅ PASO 1: Crear sesión RÁPIDO (< 100ms) - SOLO crear sesión, sin generar pregunta
       const sesionResponse = await fetch(
-        `${apiBase}/iniciar-sesion/${framework}?usuario_id=${user.id}`,
+        `${apiBase}/preguntas/iniciar-sesion/${framework}`,
         {
           method: 'GET',
           headers: {

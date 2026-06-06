@@ -3,14 +3,31 @@ app/services/llm/client.py
 
 Cliente LLM multi-proveedor: Groq, OpenAI, Anthropic, Ollama.
 Proveedor activo configurado en settings.LLM_PROVIDER (.env).
+
+MEJORAS:
+  - Retry automático con exponential backoff ante HTTP 429 (rate limit)
+  - Jitter aleatorio para evitar thundering herd con múltiples workers
+  - Logs detallados por intento
 """
 
+import asyncio
 import logging
+import random
+
 import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Reintentos máximos ante 429
+_MAX_RETRIES = 3
+# Segundos base de espera (se duplica por cada intento: 2, 4, 8)
+_BACKOFF_BASE = 2.0
+
+
+class LLMRateLimitError(Exception):
+    """Rate limit de Groq/OpenAI agotado tras todos los reintentos."""
 
 
 class LLMClient:
@@ -28,12 +45,14 @@ class LLMClient:
         self.temperature = settings.LLM_TEMPERATURE
         self.max_tokens  = settings.LLM_MAX_TOKENS
         logger.info(
-            "🤖 LLMClient → provider=%s | model=%s", self.provider, self.model
+            "🤖 LLMClient → provider=%s | model=%s | max_retries=%d",
+            self.provider, self.model, _MAX_RETRIES,
         )
 
     async def chat(self, messages: list[dict], **kwargs) -> str:
         """
         Envía mensajes al proveedor activo y retorna el texto de respuesta.
+        Reintenta automáticamente hasta _MAX_RETRIES veces ante HTTP 429.
 
         Args:
             messages: Formato OpenAI [{"role": "system|user|assistant", "content": "..."}]
@@ -41,6 +60,10 @@ class LLMClient:
 
         Returns:
             Texto plano de la respuesta del LLM.
+
+        Raises:
+            LLMRateLimitError: si se agotan todos los reintentos ante 429.
+            httpx.HTTPStatusError: para cualquier otro error HTTP.
         """
         provider = kwargs.get("provider", self.provider)
 
@@ -75,7 +98,7 @@ class LLMClient:
 
         return await handler(messages=messages, **kwargs)
 
-    # ── Groq / OpenAI ────────────────────────────────────────────────────────
+    # ── Groq / OpenAI ─────────────────────────────────────────────────────────
 
     async def _call_openai_compatible(
         self, base_url: str, api_key: str, messages: list[dict], **kwargs
@@ -87,24 +110,68 @@ class LLMClient:
             )
 
         payload = {
-            "model":       kwargs.get("model", self.model),
-            "messages":    messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens":  kwargs.get("max_tokens", self.max_tokens),
+            "model":           kwargs.get("model", self.model),
+            "messages":        messages,
+            "temperature":     kwargs.get("temperature", self.temperature),
+            "max_tokens":      kwargs.get("max_tokens", self.max_tokens),
+            "response_format": {"type": "json_object"},
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type":  "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
+        last_exc: Exception | None = None
 
-        return response.json()["choices"][0]["message"]["content"]
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type":  "application/json",
+                        },
+                        json=payload,
+                    )
+
+                if response.status_code == 429:
+                    wait = _backoff_seconds(attempt)
+                    logger.warning(
+                        "⚠️  LLM rate limit (429) en intento %d/%d — "
+                        "esperando %.1fs antes de reintentar...",
+                        attempt, _MAX_RETRIES, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    last_exc = httpx.HTTPStatusError(
+                        "429 Too Many Requests",
+                        request=response.request,
+                        response=response,
+                    )
+                    continue  # siguiente intento
+
+                response.raise_for_status()
+                logger.debug(
+                    "✅ LLM OK en intento %d | provider=%s | tokens_approx=%d",
+                    attempt, self.provider, len(str(messages)),
+                )
+                return response.json()["choices"][0]["message"]["content"]
+
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 429:
+                    # Error no recuperable — lanzar inmediatamente
+                    logger.error(
+                        "❌ LLM HTTP error %d: %s",
+                        exc.response.status_code, exc,
+                    )
+                    raise
+                last_exc = exc
+
+        # Agotados todos los reintentos
+        logger.error(
+            "🚨 LLM rate limit agotado tras %d intentos (provider=%s)",
+            _MAX_RETRIES, self.provider,
+        )
+        raise LLMRateLimitError(
+            f"Rate limit de {self.provider} agotado tras {_MAX_RETRIES} intentos. "
+            "Intenta de nuevo en unos segundos."
+        ) from last_exc
 
     # ── Anthropic / Claude ────────────────────────────────────────────────────
 
@@ -163,6 +230,19 @@ class LLMClient:
             response.raise_for_status()
 
         return response.json()["message"]["content"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _backoff_seconds(attempt: int) -> float:
+    """
+    Exponential backoff con jitter aleatorio.
+    Intento 1 → ~2s, intento 2 → ~4s, intento 3 → ~8s
+    El jitter evita que múltiples workers golpeen la API al mismo tiempo.
+    """
+    return (_BACKOFF_BASE ** attempt) + random.uniform(0, 1)
 
 
 # Instancia global reutilizable

@@ -3,15 +3,20 @@ app/services/rag/rag_service.py
 
 Orquestador RAG puro: retriever + prompt + LLM.
 Sin lógica de negocio ni persistencia — eso va en generacion/ y evaluacion/.
+
+MEJORAS:
+  - Captura LLMRateLimitError y la convierte en HTTPException 429 legible
+  - Logs de duración para detectar cuellos de botella
 """
 
-import random
 import logging
+import random
+import time
 from typing import Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 
-from app.services.llm.client import llm_client
+from app.services.llm.client import LLMRateLimitError, llm_client
 from app.services.llm.prompts.preguntas_prompts import build_question_prompt
 from app.services.llm.prompts.evaluacion_prompts import build_code_analysis_prompt
 from app.services.llm.parser import parse_llm_json
@@ -56,15 +61,20 @@ class RAGService:
             return ""
 
         try:
+            t0 = time.perf_counter()
             contexto = await retriever.buscar(
                 query=query,
                 framework=framework,
                 top_k=top_k,
             )
-            logger.debug("RAG: %d chars de contexto recuperados", len(contexto))
+            elapsed = time.perf_counter() - t0
+            logger.debug(
+                "RAG búsqueda OK | framework=%s | chars=%d | %.2fs",
+                framework, len(contexto), elapsed,
+            )
             return contexto
         except Exception as exc:
-            logger.error("Error en búsqueda RAG: %s", exc)
+            logger.error("❌ Error en búsqueda RAG: %s", exc)
             return ""
 
     async def generar_pregunta(
@@ -81,9 +91,11 @@ class RAGService:
 
         Returns:
             Dict con la estructura RespuestaPregunta del LLM.
+
+        Raises:
+            HTTPException 429: si Groq está en rate limit tras todos los reintentos.
         """
-        # Query aleatoria para diversidad semántica en OpenSearch
-        query = _build_pregunta_query(framework)
+        query        = _build_pregunta_query(framework)
         contexto_rag = await self.recuperar_contexto(query=query, framework=framework)
 
         messages = build_question_prompt(
@@ -92,9 +104,22 @@ class RAGService:
             contexto_adaptativo=contexto_adaptativo,
         )
 
-        raw = await llm_client.chat(messages=messages)
+        try:
+            t0  = time.perf_counter()
+            raw = await llm_client.chat(messages=messages)
+            logger.info(
+                "✅ Pregunta generada | framework=%s | %.2fs",
+                framework, time.perf_counter() - t0,
+            )
+        except LLMRateLimitError as exc:
+            logger.warning("🚨 Rate limit al generar pregunta: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="El servicio de IA está temporalmente saturado. "
+                       "Intenta de nuevo en unos segundos.",
+            ) from exc
+
         resultado = parse_llm_json(raw, fallback_key="pregunta_practica")
-        logger.info("✅ Pregunta generada para %s", framework)
         return resultado
 
     async def analizar_codigo(
@@ -113,8 +138,11 @@ class RAGService:
 
         Returns:
             Dict con la estructura RespuestaAnalisisCodigo del LLM.
+
+        Raises:
+            HTTPException 429: si Groq está en rate limit tras todos los reintentos.
         """
-        query = f"buenas prácticas {framework} code review patrones arquitectura"
+        query        = f"buenas prácticas {framework} code review patrones arquitectura"
         contexto_rag = await self.recuperar_contexto(query=query, framework=framework)
 
         messages = build_code_analysis_prompt(
@@ -124,12 +152,22 @@ class RAGService:
             contexto_rag=contexto_rag,
         )
 
-        raw = await llm_client.chat(
-            messages=messages,
-            temperature=0.3,   # Más determinista para análisis
-        )
+        try:
+            t0  = time.perf_counter()
+            raw = await llm_client.chat(messages=messages, temperature=0.3)
+            logger.info(
+                "✅ Código analizado | framework=%s | %.2fs",
+                framework, time.perf_counter() - t0,
+            )
+        except LLMRateLimitError as exc:
+            logger.warning("🚨 Rate limit al analizar código: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="El servicio de IA está temporalmente saturado. "
+                       "Intenta de nuevo en unos segundos.",
+            ) from exc
+
         resultado = parse_llm_json(raw, fallback_key="calificacion_general")
-        logger.info("✅ Código analizado para framework=%s", framework)
         return resultado
 
 

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.repositories import tecnologias_repo, preguntas_repo, sesiones_repo, perfil_repo
-from app.schemas.preguntas import RespuestaPregunta, SesionIniciadaResponse
+from app.schemas.preguntas import RespuestaPregunta, SesionCreadaResponse
 from app.services.rag.rag_service import RAGService
 from app.services.generacion.adaptativo_service import AdaptativoService
 
@@ -102,13 +102,16 @@ class PreguntaService:
         self,
         framework: str,
         usuario_id: Optional[UUID] = None,
-    ) -> SesionIniciadaResponse:
+    ) -> SesionCreadaResponse:
         """
         Crea la sesión en BD con pregunta placeholder (<100ms).
         La pregunta real se genera después bajo demanda.
         """
         slug       = TECH_SLUGS.get(framework)
-        tecnologia = await tecnologias_repo.get_tecnologia_por_slug(self.db, slug)
+        tecnologia = await tecnologias_repo.get_tecnologia_por_nombre(
+    self.db,
+    framework
+)
         nivel      = await tecnologias_repo.get_nivel_por_nombre(self.db, NIVEL_DEFAULT)
 
         if not tecnologia or not nivel:
@@ -141,11 +144,12 @@ class PreguntaService:
 
         logger.info("✅ Sesión rápida creada: %s (%s)", sesion.id, framework)
 
-        return SesionIniciadaResponse(
-            sesion_id=str(sesion.id),
+        return SesionCreadaResponse(
+            sesion_id=sesion.id,
             tecnologia_id=tecnologia.id,
             nivel_id=nivel.id,
-            framework=framework,
+            estado="pendiente_pregunta",
+            tiempo_limite_segundos=3600
         )
 
     # ── Helpers privados ──────────────────────────────────────────────────────
@@ -162,7 +166,10 @@ class PreguntaService:
         """Persiste pregunta y sesión. No bloquea si falla."""
         try:
             slug       = TECH_SLUGS.get(framework)
-            tecnologia = await tecnologias_repo.get_tecnologia_por_slug(self.db, slug)
+            tecnologia = await tecnologias_repo.get_tecnologia_por_nombre(
+    self.db,
+    framework
+)
             nivel      = await tecnologias_repo.get_nivel_por_nombre(self.db, NIVEL_DEFAULT)
 
             if not tecnologia or not nivel:
