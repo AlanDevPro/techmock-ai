@@ -164,10 +164,10 @@ export default function IDE() {
       };
     }
 
-    const timeoutId = window.setTimeout(startBoot, 0);
+    const timeoutId = setTimeout(startBoot, 0);
     return () => {
       mounted = false;
-      window.clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
     };
   }, [selectedFramework]);
 
@@ -770,7 +770,7 @@ export default function IDE() {
 
                 
                 <button
-                  onClick={handleSubmitCode}
+                  onClick={() => handleSubmitCode()}
                   disabled={submitStatus === "running"}
                   className="px-5 py-2 rounded text-white text-[13px] font-semibold transition-all hover:opacity-90 disabled:opacity-50"
                   style={{ background: "var(--btn-submit-bg)" }}
