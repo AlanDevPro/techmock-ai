@@ -7,9 +7,20 @@ interface TopMenuBarProps {
   toggleTheme: () => void;
   selectedFramework: "vuejs" | "nextjs" | null;
   activeFile: string;
+  timerLabel?: string;
+  timerState?: "running" | "ended" | "idle";
 }
 
-export default function TopMenuBar({ theme, toggleTheme, selectedFramework, activeFile }: TopMenuBarProps) {
+export default function TopMenuBar({
+  theme,
+  toggleTheme,
+  selectedFramework,
+  activeFile,
+  timerLabel,
+  timerState = "idle",
+}: TopMenuBarProps) {
+  const showTimer = Boolean(selectedFramework);
+  const displayLabel = timerLabel ?? "--:--";
   // Función para generar las migas de pan basadas en el archivo activo
   const generateBreadcrumbs = (filePath: string) => {
     console.log("🔍 generateBreadcrumbs - filePath recibido:", filePath);
@@ -127,6 +138,24 @@ export default function TopMenuBar({ theme, toggleTheme, selectedFramework, acti
             </span>
           ))}
         </nav>
+      </div>
+
+      {/* Center: Timer */}
+      <div className="flex-1 flex items-center justify-center">
+        {showTimer && (
+          <div
+            className="px-2.5 py-1 rounded text-[12px] border"
+            style={{
+              background: timerState === "ended" ? "#7f1d1d" : "var(--bg-tertiary)",
+              color: timerState === "ended" ? "#fecaca" : "var(--text-primary)",
+              borderColor: timerState === "ended" ? "#991b1b" : "var(--border)",
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+            title="Tiempo restante"
+          >
+            ⏱ {displayLabel}
+          </div>
+        )}
       </div>
 
       {/* Right: Theme toggle + Exit fullscreen */}

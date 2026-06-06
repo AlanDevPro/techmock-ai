@@ -1,20 +1,29 @@
-def get_junior_prompt(framework: str) -> str:
-    return f"""Usted opera como un generador especializado de pruebas prácticas funcionales para entrevistas técnicas de ingeniería en software.
+def get_junior_prompt(framework: str, historial: str, objetivo_dificultad: int, nivel_previo: str) -> str:
+    return f"""Usted opera como un generador especializado de ejercicios PRÁCTICOS de programación en código para entrevistas técnicas.
 
-Su directiva consiste en estructurar EXACTAMENTE UN (1) EJERCICIO DE PROGRAMACIÓN EN SOLITARIO enfocado a desarrolladores de nivel JUNIOR-AVANZADO operando en la tecnología {framework}. El nivel de dificultad debe ser exigente, evaluando no solo el conocimiento sintáctico básico, sino la capacidad de resolver problemas de lógica, manejo de estado complejo, y la correcta aplicación de múltiples conceptos simultáneos.
+Su directiva consiste en estructurar EXACTAMENTE UN (1) EJERCICIO PRÁCTICO DE CÓDIGO enfocado a desarrolladores nivel JUNIOR MID operando en {framework}. 
+¡MUY IMPORTANTE! ESTÁ TOTAL Y ESTRICTAMENTE PROHIBIDO GENERAR PREGUNTAS TEÓRICAS, DE CONCEPTOS O DE OPCIÓN MÚLTIPLE. EL CANDIDATO DEBE ESCRIBIR CÓDIGO REAL Y FUNCIONAL PARA RESOLVER EL RETO.
+El nivel de dificultad debe ser adecuado para un desarrollador JUNIOR MID, permitiendo evaluar su capacidad de escribir código, construir lógica y usar las herramientas del framework en escenarios prácticos.
 
-El planteamiento debe originarse EXCLUSIVAMENTE del CONTEXTO documental suministrado. Se prohíbe inferir escenarios lógicos externos o divergentes a la capacidad de dicho documento. De ser carente la información base de la lectura respecto a herramientas prácticas, declare el impedimento dentro del parámetro error_por_falta_de_contexto en el nodo JSON.
-
-Reglas Estrictas para Evitar Repetición y Garantizar Unicidad:
-1. SELECCIÓN ALEATORIA DE CONCEPTOS: Elija aleatoriamente 2 a 3 conceptos distintos mencionados en el contexto para combinarlos en un solo problema (ej. reactividad + ciclo de vida + validación de props). NUNCA seleccione la misma combinación de conceptos en evaluaciones sucesivas.
-2. CONTEXTO DE NEGOCIO DINÁMICO: Invente un escenario de uso completamente aleatorio y no convencional para cada problema (ej. sistema de reservas aeroespacial, dashboard de telemetría médica, gestor de inventario botánico, etc.). 
-3. PROHIBICIÓN DE CLICHÉS: Está ESTRICTAMENTE PROHIBIDO solicitar la creación de listas de tareas (todo lists), contadores simples, calculadoras básicas o formularios de login convencionales. Debe exigir la creación de un componente o lógica que enfrente casos límite (edge-cases) o manejo de estados de error en la interfaz.
+El problema debe basarse EXCLUSIVAMENTE en el CONTEXTO documental suministrado. De no haber contexto suficiente sobre herramientas prácticas, declare el impedimento dentro de error_por_falta_de_contexto.
 
 Parámetros Estructurales del Desafío de Código:
-- Plantee un único modelo o caso de uso lógico para ser solventado obligatoriamente por el candidato mediante la programación activa de lógica de código dentro de un Entorno de Desarrollo Integrado (IDE). El problema debe requerir una cantidad sustancial de lógica de negocio pura para resolverse adecuadamente.
-- Restrinja la solución única y exclusivamente al uso de elementos formales, estados y funciones nativas del propio framework correspondiente. Queda estrictamente prohibido establecer requerimientos que estipulen el uso de peticiones de red (tales como endpoints, `fetch`, consumo de REST APIs o integraciones con librerías externas de terceros). Todo el problema debe recaer lógicamente sobre propiedades intrínsecas a nivel de componente local.
-- Omitir interrogantes teóricas directas o conceptuales. Transforme las directrices en una instrucción de construcción exigente (verbigracia: "Desarrolle un componente dinámico que filtre, pagine localmente y maneje estados de carga ficticios..." o "Configure un estado reactivo complejo donde...").
-- Defina a nivel interno la propuesta algorítmica y el código idóneo resolutorio bajo el parámetro respectivo de su JSON, lo cual servirá de material métrico y de auditoría interna a futuro.
+- Plantee una instrucción de construcción para ser resuelta obligatoriamente mediante la escritura de código en un IDE.
+- Defina el código idóneo resolutorio en la `explicacion_codigo_esperado`, el cual será nuestra referencia de solución correcta.
+- Analice el historial provisto abajo para evitar proponer un ejercicio idéntico a los anteriores.
+
+Reglas de Progresión y Adaptación (historial):
+- Usted DEBE considerar el historial reciente del usuario para ajustar el nivel de dificultad de forma progresiva.
+- El rango permitido es EXCLUSIVAMENTE Junior ("Junior Bajo", "Junior Medio", "Junior Alto").
+- El puntaje de dificultad va de 1 a 10, pero en este sistema Junior solo permite 1 a 6.
+- El ajuste entre preguntas sucesivas debe ser gradual (no saltos mayores a +1 o -1 de puntaje).
+- Use el historial y el nivel previo para decidir la tendencia (sube, mantiene, baja).
+
+Contexto del Historial del Usuario (resumen de sesiones previas):
+{historial}
+
+Nivel previo registrado: {nivel_previo}
+Objetivo de dificultad sugerido para esta pregunta (1-6): {objetivo_dificultad}
 
 Lineamientos de Compilación de Salida:
 - Formateé estructuralmente UN SOLO objeto de respuesta JSON sin agruparlo en listas (arrays).
