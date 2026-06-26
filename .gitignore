@@ -1,64 +1,86 @@
-# Entorno virtual
-venv/
-.venv/
-env/
-ENV/
+# ============================================================
+# .gitignore — Monorepo Profesional TechMock AI
+# ============================================================
 
-# Bytecode de Python
+# ── 1. SECRETOS Y VARIABLES DE ENTORNO (CRÍTICO) ────────────
+# Ignora absolutamente todos los archivos con valores reales
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.docker
+.env.prod
+
+# Bloquea cualquier variante accidental de entornos o llaves privadas
+.env.*
+*.pem
+*.key
+*.cert
+id_rsa
+
+# ¡EXCEPCIÓN CRÍTICA!: Permitir que los archivos de plantilla SÍ se suban
+!.env.example
+!**/ .env.example
+
+# ── 2. DEPENDENCIAS DE NODE.JS (RECURSIVO) ──────────────────
+# Ignora node_modules en la raíz y en cualquier subcarpeta (frontend, backend, editor)
+node_modules/
+**/node_modules/
+
+# Control de Versiones de Dependencias:
+# En un monorepo, SÍ es buena práctica subir los package-lock.json para asegurar
+# que tus compañeros (o Docker) instalen exactamente las mismas versiones.
+# Descomenta la línea de abajo solo si quieres bloquearlos:
+# **/package-lock.json
+
+# ── 3. COMPILACIONES Y PASOS DE BUILD ───────────────────────
+# Next.js, Vite, TypeScript compilado y empaquetados
+.next/
+**/ .next/
+out/
+**/out/
+dist/
+**/dist/
+build/
+**/build/
+.wxt/
+.turbo/
+
+# ── 4. PYTHON / API RAG (rag-api-aws) ──────────────────────
+# Caché de ejecución de Python y entornos virtuales locales
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
-
-# Distribución / empaquetado
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# Logs
-*.log
-
-# Archivos de entorno
-.env
-.env.*
-
-# Jupyter Notebook
-.ipynb_checkpoints/
-
-# Cachés de herramientas
-.mypy_cache/
 .pytest_cache/
-.ruff_cache/
+**/ .pytest_cache/
+.coverage
+htmlcov/
 
-# VS Code / IDEs
-.vscode/
-.idea/
-
-# Sistema operativo
-.DS_Store
-Thumbs.db
-
-# Archivos temporales
-*.tmp
-*.bak
-
-# Datos o embeddings (si tu RAG los genera localmente)
-data/
-storage/
-chroma/
-faiss_index/
-*.pkl
-*.sqlite
-*.db
-
-
-# virtual environments
+# Entornos virtuales específicos que tenías creados
+.env312/
+venv312/
 venv/
 .venv/
 env/
-venv312/
-rag-api-aws/venv312/
+**/venv/
+**/ .venv/
 
+# ── 5. LOGS Y TRAZAS DE ERRORES ─────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-
-firebase-service-account.json
+# ── 6. CONFIGURACIÓN DE EDITORES Y SISTEMAS OPERATIVOS ──────
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+.DS_Store
+Thumbs.db

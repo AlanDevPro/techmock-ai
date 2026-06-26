@@ -1,50 +1,10 @@
-# ============================================================
-# .dockerignore — Frontend TechMock AI
-# ============================================================
-
-# Dependencias locales
-node_modules/
-npm-debug.log*
-
-# Build output local
-.next/
-out/
-
-# Archivos de entorno con secretos
-.env
-.env.local
-.env.docker
-.env.*.local
-
-# Control de versiones
-.git/
+node_modules
+.next
+out
+build
+npm-debug.log
+.git
 .gitignore
-
-# Editores
-.vscode/
-.idea/
-*.swp
-
-# Documentación
-README.md
-*.md
-DOCKER_README.md
-
-# Docker (no incluirlos dentro de la imagen)
-Dockerfile*
-docker-compose*.yml
-docker/
-
-# Tests
-**/*.test.ts
-**/*.test.tsx
-**/*.spec.ts
-coverage/
-
-# Sistema operativo
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
+docker-compose.yml
+docker-compose.dev.yml
+docker-compose.prod.yml
