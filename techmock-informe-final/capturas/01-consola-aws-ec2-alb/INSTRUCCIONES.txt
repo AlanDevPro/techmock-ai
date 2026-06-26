@@ -1,0 +1,20 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Consola AWS - EC2 / ALB)
+
+1. ec2-instancias-listado.png   [OBLIGATORIA]
+   Donde: EC2 > Instances
+   Que mostrar: las 4 instancias con columna "Instance state" = Running y Name visible (frontend, backend, editor-ide, rag-api)
+
+2. alb-listeners-reglas.png   [OBLIGATORIA]
+   Donde: EC2 > Load Balancers > techmock-alb > pestaña Listeners
+   Que mostrar: las 4 listener rules configuradas (frontend-tg, editor-tg, rag-tg, backend-tg) con su prioridad
+
+3. alb-target-groups-frontend-healthy.png   [OBLIGATORIA]
+4. alb-target-groups-backend-healthy.png    [OBLIGATORIA]
+5. alb-target-groups-editor-healthy.png     [OBLIGATORIA]
+6. alb-target-groups-rag-healthy.png        [OBLIGATORIA]
+   Donde: EC2 > Target Groups > <nombre-tg> > pestaña Targets
+   Que mostrar: estado "healthy" del target correspondiente
+
+7. security-groups-reglas.png   [OPCIONAL]
+   Donde: EC2 > Security Groups
+   Que mostrar: reglas de entrada/salida del Security Group asociado a las instancias

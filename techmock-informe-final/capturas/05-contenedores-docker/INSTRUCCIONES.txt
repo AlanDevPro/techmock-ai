@@ -1,0 +1,9 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Contenedores Docker activos)
+
+1. docker-ps-frontend.png   [OBLIGATORIA]
+2. docker-ps-backend.png    [OBLIGATORIA]
+3. docker-ps-editor.png     [OBLIGATORIA]
+4. docker-ps-rag.png        [OBLIGATORIA]
+   Donde: terminal SSH conectado a cada instancia EC2 correspondiente
+   Comando: docker ps
+   Que mostrar: el contenedor del servicio en estado "Up", con su nombre, imagen y puertos

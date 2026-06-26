@@ -1,0 +1,9 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Consola AWS - RDS)
+
+1. rds-instancia-detalle.png   [OBLIGATORIA]
+   Donde: RDS > Databases > seleccionar instancia > pestaña Configuration
+   Que mostrar: estado "Available", motor PostgreSQL, endpoint y puerto
+
+2. rds-conexion-exitosa.png   [OPCIONAL]
+   Donde: Terminal
+   Que mostrar: salida de psql conectado exitosamente al endpoint de RDS

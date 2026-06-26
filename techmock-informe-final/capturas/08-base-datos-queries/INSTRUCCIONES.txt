@@ -1,0 +1,6 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Base de datos)
+
+1. schema-migrations-aplicadas.png   [OBLIGATORIA]
+   Donde: terminal psql
+   Comando: SELECT * FROM schema_migrations;
+   Que mostrar: la lista de migraciones aplicadas

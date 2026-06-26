@@ -1,0 +1,9 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Pipelines / CI-CD)
+
+1. pipeline-build-exitoso.png   [SI APLICA]
+2. pipeline-deploy-exitoso.png  [SI APLICA]
+   Donde: GitHub > pestaña Actions (o la herramienta de CI/CD usada)
+   Que mostrar: workflow en estado exitoso (verde / success)
+
+Si el equipo no implemento CI/CD automatizado, dejar esta carpeta vacia
+y aclararlo explicitamente en la seccion 8.6 del informe.

@@ -1,0 +1,17 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Aplicacion funcionando)
+
+1. frontend-login.png   [OBLIGATORIA]
+   Donde: navegador, URL publica del frontend
+   Que mostrar: pantalla de login/registro funcionando
+
+2. editor-ide-cargado.png   [OBLIGATORIA]
+   Donde: navegador, URL publica con /editor
+   Que mostrar: el editor tipo VSCode cargado correctamente
+
+3. rag-pregunta-generada.png   [OBLIGATORIA]
+   Donde: navegador o Postman, endpoint del RAG API
+   Que mostrar: una pregunta de entrevista generada en tiempo real por el modelo
+
+4. recuperacion-contrasenia-correo.png   [OBLIGATORIA]
+   Donde: bandeja de entrada de un correo de prueba
+   Que mostrar: el email de recuperacion de contrasena recibido via SES

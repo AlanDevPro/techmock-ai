@@ -1,0 +1,9 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Consola AWS - SES)
+
+1. ses-identidades-verificadas.png   [OBLIGATORIA]
+   Donde: SES > Verified identities
+   Que mostrar: dominio o correo en estado Verified
+
+2. ses-estadisticas-envio.png   [OPCIONAL]
+   Donde: SES > Account dashboard
+   Que mostrar: estadisticas de envio/entrega

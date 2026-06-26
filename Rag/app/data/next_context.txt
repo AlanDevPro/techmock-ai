@@ -1,7 +1,0 @@
-Next.js es un entorno de desarrollo estructurado basado en React. Facilita requerimientos de renderización optimizada proporcionando infraestructuras para renderizado del lado del servidor (SSR) y generación automatizada de sitios estáticos (SSG).
-
-Dentro de los parámetros correspondientes al App Router (implementado a partir de la versión introductoria 13), toda lógica de enrutamiento obedece al sistema formal de arquitecturas de directorios; donde los endpoints web se configuran exclusivamente empleando los segmentos de carpeta y los ficheros reservados de nomenclatura 'page.tsx'.
-
-Este modelo técnico soporta arquitecturas de tipo 'Server Components' por defecto a través del uso de la carpeta /app. Esta modalidad mejora la métrica de rendimiento mitigando la descarga de procesamiento Javascript para el agente navegador. Para adaptar estructuralmente una entidad y forzar su renderizado a nivel cliente ('Client Component') e implementar así recursos internos tipo hooks (useState o useEffect), es regulatoriamente estricto incluir una directiva '"use client"' inyectada en la delimitación superior del fichero computacional.
-
-La recolección de datos y fetching de redes (Data Fetching) es ejecutada de forma nativa priorizando operaciones de red asíncronas resolutivas (async/await) aplicadas directamente previo al ciclo de rotorno en Server Components.

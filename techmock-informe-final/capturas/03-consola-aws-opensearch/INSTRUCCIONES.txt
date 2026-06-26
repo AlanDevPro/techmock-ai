@@ -1,0 +1,9 @@
+CAPTURAS REQUERIDAS EN ESTA CARPETA (Consola AWS - OpenSearch)
+
+1. opensearch-dashboard-dominio.png   [OBLIGATORIA]
+   Donde: OpenSearch Service > Domains > dominio
+   Que mostrar: estado del cluster (Active / verde), numero de nodos
+
+2. opensearch-indices-creados.png   [OPCIONAL]
+   Donde: Terminal o consola
+   Que mostrar: lista de indices creados para los embeddings
