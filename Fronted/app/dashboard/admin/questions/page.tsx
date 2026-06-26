@@ -3,53 +3,69 @@
 /**
  * /app/(protected)/dashboard/admin/questions/page.tsx
  *
- * Preguntas — gestión completa desde el panel admin.
- * Mapea tabla: preguntas (JOIN tecnologias, niveles_dificultad).
+ * Preguntas — vista de solo lectura para el administrador.
+ * Las preguntas son generadas automáticamente por el sistema de IA adaptativa.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useThemeContext } from "@/components/providers/ThemeProvider";
 
 import {
   type PreguntaAPI,
   type Tecnologia,
   type Nivel,
-  type CreatePreguntaPayload,
   getPreguntasConCatalogos,
-  createPregunta,
-  togglePreguntaActiva,
-  deletePregunta,
 } from "@/services/questions.service";
 
-// ─── Tema ─────────────────────────────────────────────────────────────────────
+// ─── Tema basado en ThemeProvider ─────────────────────────────────────────────
 
-const T = {
-  bg:           "#111214",
-  surface:      "#1a1c20",
-  surfaceHover: "#22252b",
-  border:       "rgba(255,255,255,0.08)",
-  text:         "#e8eaed",
-  textMuted:    "#8b8fa8",
-  textFaint:    "#555868",
-  accent:       "#00c96b",
-  accentBg:     "rgba(0,201,107,0.1)",
-  danger:       "#ef4444",
-  dangerBg:     "rgba(239,68,68,0.1)",
-  searchBg:     "rgba(255,255,255,0.06)",
-  searchBorder: "rgba(255,255,255,0.12)",
-  inputBg:      "rgba(255,255,255,0.05)",
-};
+const getThemeTokens = (isDark: boolean) => ({
+  bg: isDark ? "#111214" : "#f0f2f5",
+  surface: isDark ? "#1a1c20" : "#ffffff",
+  surfaceHover: isDark ? "#22252b" : "#f0f2f5",
+  border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+  text: isDark ? "#e8eaed" : "#111214",
+  textMuted: isDark ? "#8b8fa8" : "#5f6478",
+  textFaint: isDark ? "#555868" : "#adb0be",
+  accent: isDark ? "#00c96b" : "#00a855",
+  accentBg: isDark ? "rgba(0,201,107,0.1)" : "rgba(0,168,85,0.08)",
+  danger: isDark ? "#ef4444" : "#dc2626",
+  dangerBg: isDark ? "rgba(239,68,68,0.1)" : "rgba(220,38,38,0.08)",
+  warning: isDark ? "#f59e0b" : "#d97706",
+  warningBg: isDark ? "rgba(245,158,11,0.1)" : "rgba(217,119,6,0.08)",
+  info: isDark ? "#3b82f6" : "#2563eb",
+  infoBg: isDark ? "rgba(59,130,246,0.1)" : "rgba(37,99,235,0.08)",
+  purple: isDark ? "#a855f7" : "#9333ea",
+  purpleBg: isDark ? "rgba(168,85,247,0.1)" : "rgba(147,51,234,0.08)",
+  searchBg: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+  searchBorder: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.1)",
+});
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const NIVEL_COLORS: Record<string, string> = {
-  Junior: "#00c96b", Mid: "#3b82f6", Senior: "#a855f7",
+const getNivelColors = (tokens: ReturnType<typeof getThemeTokens>): Record<string, string> => ({
+  Junior: tokens.accent,
+  "Junior+": tokens.info,
+  Mid: tokens.purple,
+  "Mid+": tokens.warning,
+  Senior: tokens.danger,
+});
+
+const TIPO_LABELS: Record<string, string> = {
+  live_coding: "Live Coding",
+  teoria: "Teoría",
+  debugging: "Debugging",
+  arquitectura: "Arquitectura",
+  optimizacion: "Optimización",
 };
 
-const TIPO_COLORS: Record<string, string> = {
-  teorica: "#f59e0b", practica: "#3b82f6", arquitectura: "#a855f7",
-};
-
-const TIPOS_PREGUNTA = ["practica", "teorica", "arquitectura"];
+const getTipoColors = (tokens: ReturnType<typeof getThemeTokens>): Record<string, string> => ({
+  live_coding: tokens.accent,
+  teoria: tokens.warning,
+  debugging: tokens.danger,
+  arquitectura: tokens.purple,
+  optimizacion: tokens.info,
+});
 
 // ─── Componentes base ─────────────────────────────────────────────────────────
 
@@ -62,219 +78,157 @@ function Badge({ label, color }: { label: string; color: string }) {
 }
 
 function SelectFilter({
-  value, onChange, options,
+  value, onChange, options, tokens,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  tokens: ReturnType<typeof getThemeTokens>;
 }) {
   return (
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      style={{ background: T.searchBg, border: `1px solid ${T.searchBorder}`, borderRadius: 8, padding: "7px 10px", fontSize: 13, color: T.text, outline: "none", cursor: "pointer", fontFamily: "inherit" }}
+      style={{ background: tokens.searchBg, border: `1px solid ${tokens.searchBorder}`, borderRadius: 8, padding: "7px 10px", fontSize: 13, color: tokens.text, outline: "none", cursor: "pointer", fontFamily: "inherit" }}
     >
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
 }
 
-function Spinner({ size = 28, color = T.accent }: { size?: number; color?: string }) {
+function Spinner({ size = 28, color }: { size?: number; color?: string }) {
   return (
-    <div style={{ width: size, height: size, border: `3px solid rgba(255,255,255,0.08)`, borderTop: `3px solid ${color}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+    <div style={{ width: size, height: size, border: `3px solid rgba(128,128,128,0.2)`, borderTop: `3px solid ${color || "#00c96b"}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
   );
 }
 
-// ─── Modal: Nueva pregunta ────────────────────────────────────────────────────
-
-interface ModalProps {
-  onClose:     () => void;
-  onCreated:   (p: PreguntaAPI) => void;
-  tecnologias: Tecnologia[];
-  niveles:     Nivel[];
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-BO", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
 }
 
-function ModalNuevaPregunta({ onClose, onCreated, tecnologias, niveles }: ModalProps) {
-  const [form, setForm] = useState<CreatePreguntaPayload>({
-    tecnologia_id:      tecnologias[0]?.id ?? 0,
-    nivel_id:           niveles[0]?.id ?? 0,
-    titulo:             "",
-    enunciado:          "",
-    tipo:               "practica",
-    tiempo_estimado_min: 30,
-    prompt_contexto:    "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState<string | null>(null);
+// ─── Modal de detalle de pregunta ─────────────────────────────────────────────
 
-  const set = <K extends keyof CreatePreguntaPayload>(k: K, v: CreatePreguntaPayload[K]) =>
-    setForm(prev => ({ ...prev, [k]: v }));
+interface DetailModalProps {
+  pregunta: PreguntaAPI;
+  onClose: () => void;
+  tokens: ReturnType<typeof getThemeTokens>;
+}
 
-  const handleSubmit = async () => {
-    if (!form.titulo.trim() || !form.enunciado.trim()) {
-      setError("Título y enunciado son obligatorios.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const nueva = await createPregunta(form);
-      onCreated(nueva);
-      onClose();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error al crear pregunta");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%", background: T.inputBg, border: `1px solid ${T.searchBorder}`,
-    borderRadius: 9, padding: "9px 12px", fontSize: 13, color: T.text,
-    outline: "none", fontFamily: "inherit", boxSizing: "border-box",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontSize: 11, fontWeight: 600, color: T.textFaint,
-    textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6, display: "block",
-  };
-
+function DetailModal({ pregunta, onClose, tokens }: DetailModalProps) {
+  const nivelColors = getNivelColors(tokens);
+  const tipoColors = getTipoColors(tokens);
+  
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center" }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
       onClick={onClose}
     >
       <div
-        style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "1.75rem", width: 520, maxWidth: "92vw", maxHeight: "90vh", overflowY: "auto" }}
+        style={{ background: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 18, padding: "1.75rem", width: 620, maxWidth: "92vw", maxHeight: "90vh", overflowY: "auto" }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header modal */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: T.text }}>Nueva pregunta</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: T.textMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>✕</button>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: tokens.text }}>{pregunta.titulo}</h2>
+            {pregunta.generada_por_ia && (
+              <span style={{ background: tokens.infoBg, color: tokens.info, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 99 }}>
+                <i className="ti ti-robot" style={{ fontSize: 12, marginRight: 4 }} />
+                IA
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: tokens.textMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>✕</button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-
-          {/* Título */}
-          <div>
-            <label style={labelStyle}>Título *</label>
-            <input
-              value={form.titulo}
-              onChange={e => set("titulo", e.target.value)}
-              placeholder="Ej: Implementa un hook de paginación…"
-              style={inputStyle}
-            />
-          </div>
-
-          {/* Enunciado */}
-          <div>
-            <label style={labelStyle}>Enunciado *</label>
-            <textarea
-              value={form.enunciado}
-              onChange={e => set("enunciado", e.target.value)}
-              placeholder="Descripción detallada del problema…"
-              rows={4}
-              style={{ ...inputStyle, resize: "vertical" }}
-            />
-          </div>
-
-          {/* Tecnología + Nivel */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Tecnología *</label>
-              <select value={form.tecnologia_id} onChange={e => set("tecnologia_id", Number(e.target.value))} style={inputStyle}>
-                {tecnologias.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Nivel *</label>
-              <select value={form.nivel_id} onChange={e => set("nivel_id", Number(e.target.value))} style={inputStyle}>
-                {niveles.map(n => <option key={n.id} value={n.id}>{n.nombre}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Tipo + Tiempo */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={labelStyle}>Tipo *</label>
-              <select value={form.tipo} onChange={e => set("tipo", e.target.value)} style={inputStyle}>
-                {TIPOS_PREGUNTA.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>Tiempo estimado (min)</label>
-              <input
-                type="number" min={5} max={180}
-                value={form.tiempo_estimado_min}
-                onChange={e => set("tiempo_estimado_min", Number(e.target.value))}
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          {/* Prompt contexto */}
-          <div>
-            <label style={labelStyle}>
-              Contexto para IA{" "}
-              <span style={{ color: T.textFaint, fontWeight: 400, textTransform: "none" }}>(opcional)</span>
-            </label>
-            <input
-              value={form.prompt_contexto ?? ""}
-              onChange={e => set("prompt_contexto", e.target.value)}
-              placeholder="Instrucciones adicionales para la IA al evaluar…"
-              style={inputStyle}
-            />
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div style={{ background: T.dangerBg, border: `1px solid ${T.danger}33`, borderRadius: 9, padding: "10px 14px", fontSize: 13, color: T.danger }}>
-              {error}
-            </div>
-          )}
-
-          {/* Acciones */}
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
-            <button
-              onClick={onClose}
-              disabled={saving}
-              style={{ padding: "9px 18px", borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", color: T.textMuted, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={saving}
-              style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: saving ? 0.7 : 1 }}
-            >
-              {saving ? <><Spinner size={14} color="#fff" /> Guardando…</> : "Crear pregunta"}
-            </button>
-          </div>
+        {/* Metadata tags */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+          <Badge label={pregunta.tecnologia} color={tokens.accent} />
+          <Badge label={pregunta.nivel} color={nivelColors[pregunta.nivel] ?? tokens.textMuted} />
+          <Badge label={TIPO_LABELS[pregunta.tipo]} color={tipoColors[pregunta.tipo] ?? tokens.textMuted} />
+          <span style={{ fontSize: 12, color: tokens.textFaint }}>
+            <i className="ti ti-clock" style={{ fontSize: 12, marginRight: 4 }} />
+            {pregunta.tiempo_estimado_min} min
+          </span>
+          <span style={{ fontSize: 12, color: tokens.textFaint }}>
+            <i className="ti ti-calendar" style={{ fontSize: 12, marginRight: 4 }} />
+            {formatDate(pregunta.fecha_creacion)}
+          </span>
         </div>
+
+        {/* Enunciado */}
+        <div style={{ background: tokens.bg, borderRadius: 12, padding: "16px", marginBottom: 20 }}>
+          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: tokens.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>Enunciado</p>
+          <p style={{ margin: 0, fontSize: 14, color: tokens.text, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{pregunta.enunciado}</p>
+        </div>
+
+        {/* Categorías de error objetivo */}
+        {pregunta.categorias_error_objetivo && pregunta.categorias_error_objetivo.length > 0 && (
+          <div style={{ background: tokens.surfaceHover, borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+            <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: tokens.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <i className="ti ti-chart-bubble" style={{ fontSize: 12, marginRight: 6 }} />
+              Categorías de error evaluadas
+            </p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {pregunta.categorias_error_objetivo.map(cat => (
+                <span key={cat} style={{ background: tokens.warningBg, color: tokens.warning, fontSize: 11, padding: "3px 9px", borderRadius: 99 }}>
+                  {cat.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Contexto adaptativo */}
+        {pregunta.contexto_adaptativo && (
+          <div style={{ background: tokens.surfaceHover, borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+            <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: tokens.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <i className="ti ti-adjustments" style={{ fontSize: 12, marginRight: 6 }} />
+              Contexto adaptativo
+            </p>
+            <pre style={{ margin: 0, fontSize: 12, color: tokens.textMuted, whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+              {JSON.stringify(pregunta.contexto_adaptativo, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {/* Prompt contexto */}
+        {pregunta.prompt_contexto && (
+          <div style={{ background: tokens.surfaceHover, borderRadius: 12, padding: "16px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 600, color: tokens.textFaint, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <i className="ti ti-message-code" style={{ fontSize: 12, marginRight: 6 }} />
+              Instrucciones para la IA
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: tokens.textMuted, lineHeight: 1.5 }}>{pregunta.prompt_contexto}</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Página principal ─────────────────────────────────────────────────────────
+// ─── Página principal (solo lectura) ─────────────────────────────────────────
 
 export default function QuestionsPage() {
-  const [preguntas,     setPreguntas]     = useState<PreguntaAPI[]>([]);
-  const [tecnologias,   setTecnologias]   = useState<Tecnologia[]>([]);
-  const [niveles,       setNiveles]       = useState<Nivel[]>([]);
-  const [loading,       setLoading]       = useState(true);
-  const [error,         setError]         = useState<string | null>(null);
-  const [search,        setSearch]        = useState("");
-  const [nivelFilter,   setNivelFilter]   = useState("todos");
-  const [tipoFilter,    setTipoFilter]    = useState("todos");
-  const [statusFilter,  setStatusFilter]  = useState("todos");
-  const [showModal,     setShowModal]     = useState(false);
-  const [toggling,      setToggling]      = useState<number | null>(null);
-  const [deleting,      setDeleting]      = useState<number | null>(null);
+  const { isDark } = useThemeContext();
+  const tokens = getThemeTokens(isDark);
+  const nivelColors = getNivelColors(tokens);
+  const tipoColors = getTipoColors(tokens);
 
-  // ── Fetch inicial (preguntas + catálogos en paralelo) ──────────────────────
+  const [preguntas, setPreguntas] = useState<PreguntaAPI[]>([]);
+  const [tecnologias, setTecnologias] = useState<Tecnologia[]>([]);
+  const [niveles, setNiveles] = useState<Nivel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [nivelFilter, setNivelFilter] = useState("todos");
+  const [tipoFilter, setTipoFilter] = useState("todos");
+  const [tecnologiaFilter, setTecnologiaFilter] = useState("todas");
+  const [selectedPregunta, setSelectedPregunta] = useState<PreguntaAPI | null>(null);
+
+  // ── Fetch inicial ──────────────────────────────────────────────────────────
 
   const fetchTodo = useCallback(async () => {
     setLoading(true);
@@ -294,61 +248,28 @@ export default function QuestionsPage() {
 
   useEffect(() => { fetchTodo(); }, [fetchTodo]);
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
-
-  const handleToggleActive = async (id: number, activa: boolean) => {
-    setToggling(id);
-    // Optimistic update
-    setPreguntas(prev => prev.map(q => q.id === id ? { ...q, activa: !activa } : q));
-    try {
-      await togglePreguntaActiva(id, !activa);
-    } catch (err: unknown) {
-      // Revert on error
-      setPreguntas(prev => prev.map(q => q.id === id ? { ...q, activa } : q));
-      alert(err instanceof Error ? err.message : "Error al cambiar estado");
-    } finally {
-      setToggling(null);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("¿Desactivar esta pregunta? (Soft delete — no se elimina físicamente)")) return;
-    setDeleting(id);
-    try {
-      await deletePregunta(id);
-      // Soft delete → pone activa = false localmente
-      setPreguntas(prev => prev.map(q => q.id === id ? { ...q, activa: false } : q));
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Error al eliminar");
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const handleCreated = (nueva: PreguntaAPI) =>
-    setPreguntas(prev => [nueva, ...prev]);
-
   // ── Derivados ──────────────────────────────────────────────────────────────
 
   const nivelesUnicos = useMemo(() => [...new Set(preguntas.map(q => q.nivel))].sort(), [preguntas]);
-  const tiposUnicos   = useMemo(() => [...new Set(preguntas.map(q => q.tipo))].sort(), [preguntas]);
+  const tiposUnicos = useMemo(() => [...new Set(preguntas.map(q => q.tipo))].sort(), [preguntas]);
+  const tecnologiasUnicas = useMemo(() => [...new Set(preguntas.map(q => q.tecnologia))].sort(), [preguntas]);
 
   const filtered = useMemo(() => {
     return preguntas.filter(q => {
       const s = search.toLowerCase();
       if (search && !q.titulo.toLowerCase().includes(s) && !q.tecnologia.toLowerCase().includes(s)) return false;
-      if (nivelFilter  !== "todos"    && q.nivel  !== nivelFilter)  return false;
-      if (tipoFilter   !== "todos"    && q.tipo   !== tipoFilter)   return false;
-      if (statusFilter === "activa"   && !q.activa)                 return false;
-      if (statusFilter === "inactiva" && q.activa)                  return false;
+      if (nivelFilter !== "todos" && q.nivel !== nivelFilter) return false;
+      if (tipoFilter !== "todos" && q.tipo !== tipoFilter) return false;
+      if (tecnologiaFilter !== "todas" && q.tecnologia !== tecnologiaFilter) return false;
       return true;
     });
-  }, [preguntas, search, nivelFilter, tipoFilter, statusFilter]);
+  }, [preguntas, search, nivelFilter, tipoFilter, tecnologiaFilter]);
 
   const stats = useMemo(() => ({
-    total:      preguntas.length,
-    activas:    preguntas.filter(q => q.activa).length,
-    porIa:      preguntas.filter(q => q.generada_por_ia).length,
+    total: preguntas.length,
+    activas: preguntas.filter(q => q.activa).length,
+    porIa: preguntas.filter(q => q.generada_por_ia).length,
+    adaptativas: preguntas.filter(q => q.categorias_error_objetivo && q.categorias_error_objetivo.length > 0).length,
     tiempoProm: preguntas.length > 0
       ? Math.round(preguntas.reduce((a, q) => a + q.tiempo_estimado_min, 0) / preguntas.length)
       : 0,
@@ -361,94 +282,85 @@ export default function QuestionsPage() {
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/tabler-icons.min.css" />
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-      <div style={{ fontFamily: "'DM Sans', sans-serif", color: T.text, fontSize: 14 }}>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", color: tokens.text, fontSize: 14 }}>
 
         {/* ── Header ── */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: T.text }}>Preguntas</h1>
-            <p style={{ margin: "4px 0 0", fontSize: 13, color: T.textMuted }}>
-              {loading ? "Cargando…" : `${preguntas.length} preguntas · ${stats.porIa} generadas por IA`}
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: tokens.text, letterSpacing: "-0.02em" }}>
+              Banco de Preguntas
+            </h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: tokens.textMuted }}>
+              {loading ? "Cargando…" : `${preguntas.length} preguntas · ${stats.porIa} generadas por IA · ${stats.adaptativas} adaptativas`}
             </p>
           </div>
-          <button
-            disabled={loading}
-            onClick={() => setShowModal(true)}
-            style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 10, border: "none", background: T.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}
-          >
-            <i className="ti ti-plus" style={{ fontSize: 16 }} />
-            Nueva pregunta
-          </button>
         </div>
 
         {/* ── Stats ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginBottom: 24 }}>
           {[
-            { label: "Total",        value: stats.total,                icon: "ti-help-circle",  color: "#a855f7" },
-            { label: "Activas",      value: stats.activas,              icon: "ti-circle-check", color: "#00c96b" },
-            { label: "Generadas IA", value: stats.porIa,                icon: "ti-sparkles",     color: "#3b82f6" },
-            { label: "Tiempo prom.", value: `${stats.tiempoProm} min`,  icon: "ti-clock",        color: "#f59e0b" },
+            { label: "Total", value: stats.total, icon: "ti-help-circle", color: tokens.purple },
+            { label: "Activas", value: stats.activas, icon: "ti-circle-check", color: tokens.accent },
+            { label: "Generadas IA", value: stats.porIa, icon: "ti-sparkles", color: tokens.info },
+            { label: "Adaptativas", value: stats.adaptativas, icon: "ti-robot", color: tokens.warning },
+            { label: "Tiempo prom.", value: `${stats.tiempoProm} min`, icon: "ti-clock", color: "#ec4899" },
           ].map(s => (
-            <div key={s.label} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+            <div key={s.label} style={{ background: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ width: 38, height: 38, borderRadius: 10, background: s.color + "18", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <i className={`ti ${s.icon}`} style={{ fontSize: 18, color: s.color }} />
               </div>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: T.text, lineHeight: 1 }}>
-                  {loading
-                    ? <div style={{ width: 40, height: 20, background: "rgba(255,255,255,0.06)", borderRadius: 4 }} />
-                    : s.value
-                  }
+                <div style={{ fontSize: 22, fontWeight: 700, color: loading ? tokens.textFaint : tokens.text, lineHeight: 1 }}>
+                  {loading ? <div style={{ width: 40, height: 20, background: tokens.searchBg, borderRadius: 4 }} /> : s.value}
                 </div>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{s.label}</div>
+                <div style={{ fontSize: 11, color: tokens.textMuted, marginTop: 2 }}>{s.label}</div>
               </div>
             </div>
           ))}
         </div>
 
         {/* ── Filters ── */}
-        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ background: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
-            <i className="ti ti-search" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: T.textFaint, pointerEvents: "none" }} />
+            <i className="ti ti-search" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: tokens.textFaint, pointerEvents: "none" }} />
             <input
               type="text"
               placeholder="Buscar por título o tecnología…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              style={{ width: "100%", background: T.searchBg, border: `1px solid ${T.searchBorder}`, borderRadius: 8, padding: "7px 12px 7px 32px", fontSize: 13, color: T.text, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const }}
+              style={{ width: "100%", background: tokens.searchBg, border: `1px solid ${tokens.searchBorder}`, borderRadius: 8, padding: "7px 12px 7px 32px", fontSize: 13, color: tokens.text, outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const }}
             />
           </div>
+          <SelectFilter
+            value={tecnologiaFilter}
+            onChange={setTecnologiaFilter}
+            options={[{ value: "todas", label: "Todas las tecnologías" }, ...tecnologiasUnicas.map(t => ({ value: t, label: t }))]}
+            tokens={tokens}
+          />
           <SelectFilter
             value={nivelFilter}
             onChange={setNivelFilter}
             options={[{ value: "todos", label: "Todos los niveles" }, ...nivelesUnicos.map(n => ({ value: n, label: n }))]}
+            tokens={tokens}
           />
           <SelectFilter
             value={tipoFilter}
             onChange={setTipoFilter}
-            options={[{ value: "todos", label: "Todos los tipos" }, ...tiposUnicos.map(t => ({ value: t, label: t }))]}
+            options={[{ value: "todos", label: "Todos los tipos" }, ...tiposUnicos.map(t => ({ value: t, label: TIPO_LABELS[t] ?? t }))]}
+            tokens={tokens}
           />
-          <SelectFilter
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: "todos",    label: "Todos" },
-              { value: "activa",   label: "Activas" },
-              { value: "inactiva", label: "Inactivas" },
-            ]}
-          />
-          <span style={{ fontSize: 12, color: T.textFaint, marginLeft: "auto" }}>
-            {filtered.length} resultados
+          <span style={{ fontSize: 12, color: tokens.textFaint, marginLeft: "auto" }}>
+            {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
           </span>
         </div>
 
         {/* ── Tabla ── */}
-        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ background: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 14, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                {["Pregunta","Tecnología","Nivel","Tipo","Tiempo","Estado",""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "12px 16px", fontSize: 11, fontWeight: 600, color: T.textFaint, textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>
+              <tr style={{ borderBottom: `1px solid ${tokens.border}` }}>
+                {["Pregunta", "Tecnología", "Nivel", "Tipo", "Tiempo", "Origen", ""].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "12px 16px", fontSize: 11, fontWeight: 600, color: tokens.textFaint, textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
                 ))}
@@ -461,8 +373,8 @@ export default function QuestionsPage() {
                 <tr>
                   <td colSpan={7} style={{ padding: "4rem", textAlign: "center" }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                      <Spinner size={32} />
-                      <span style={{ fontSize: 13, color: T.textFaint }}>Cargando preguntas…</span>
+                      <Spinner size={32} color={tokens.accent} />
+                      <span style={{ fontSize: 13, color: tokens.textFaint }}>Cargando preguntas…</span>
                     </div>
                   </td>
                 </tr>
@@ -473,12 +385,12 @@ export default function QuestionsPage() {
                 <tr>
                   <td colSpan={7} style={{ padding: "4rem", textAlign: "center" }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                      <i className="ti ti-wifi-off" style={{ fontSize: 32, color: T.danger }} />
-                      <p style={{ margin: 0, fontSize: 14, color: T.textMuted }}>Error al cargar preguntas</p>
-                      <p style={{ margin: 0, fontSize: 12, color: T.textFaint, fontFamily: "monospace" }}>{error}</p>
+                      <i className="ti ti-wifi-off" style={{ fontSize: 32, color: tokens.danger }} />
+                      <p style={{ margin: 0, fontSize: 14, color: tokens.textMuted }}>Error al cargar preguntas</p>
+                      <p style={{ margin: 0, fontSize: 12, color: tokens.textFaint, fontFamily: "monospace" }}>{error}</p>
                       <button
                         onClick={fetchTodo}
-                        style={{ padding: "7px 18px", borderRadius: 8, border: `1px solid ${T.accent}44`, background: T.accentBg, color: T.accent, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                        style={{ padding: "7px 18px", borderRadius: 8, border: `1px solid ${tokens.accent}44`, background: tokens.accentBg, color: tokens.accent, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
                       >
                         Reintentar
                       </button>
@@ -490,8 +402,8 @@ export default function QuestionsPage() {
               {/* Sin resultados */}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: "4rem", textAlign: "center", color: T.textMuted }}>
-                    {preguntas.length === 0 ? "No hay preguntas creadas todavía" : "No se encontraron preguntas con esos filtros"}
+                  <td colSpan={7} style={{ padding: "4rem", textAlign: "center", color: tokens.textMuted }}>
+                    {preguntas.length === 0 ? "No hay preguntas generadas todavía" : "No se encontraron preguntas con esos filtros"}
                   </td>
                 </tr>
               )}
@@ -500,89 +412,92 @@ export default function QuestionsPage() {
               {!loading && !error && filtered.map(q => (
                 <tr
                   key={q.id}
-                  style={{ borderBottom: `1px solid ${T.border}`, transition: "background 0.12s" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = T.surfaceHover)}
+                  style={{ borderBottom: `1px solid ${tokens.border}`, transition: "background 0.12s", cursor: "pointer" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = tokens.surfaceHover)}
                   onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => setSelectedPregunta(q)}
                 >
                   {/* Pregunta */}
-                  <td style={{ padding: "13px 16px", maxWidth: 300 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: T.text, lineHeight: 1.4 }}>{q.titulo}</div>
-                    <div style={{ fontSize: 11, color: T.textFaint, marginTop: 3 }}>
-                      {new Date(q.fecha_creacion).toLocaleDateString("es-BO", { day: "2-digit", month: "short", year: "numeric" })}
+                  <td style={{ padding: "13px 16px", maxWidth: 320 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: tokens.text, lineHeight: 1.4 }}>{q.titulo}</div>
+                    <div style={{ fontSize: 11, color: tokens.textFaint, marginTop: 3 }}>
+                      {formatDate(q.fecha_creacion)}
                       {q.generada_por_ia && (
-                        <span style={{ marginLeft: 8, color: "#a855f7", fontWeight: 600 }}>✦ IA</span>
+                        <span style={{ marginLeft: 8, color: tokens.info, fontWeight: 600 }}>✦ IA</span>
+                      )}
+                      {q.categorias_error_objetivo && q.categorias_error_objetivo.length > 0 && (
+                        <span style={{ marginLeft: 8, color: tokens.warning, fontSize: 10 }}>🎯 Adaptativa</span>
                       )}
                     </div>
                   </td>
 
                   {/* Tecnología */}
                   <td style={{ padding: "13px 16px" }}>
-                    <span style={{ fontSize: 13, color: T.textMuted }}>{q.tecnologia}</span>
+                    <span style={{ fontSize: 13, color: tokens.textMuted }}>{q.tecnologia}</span>
                   </td>
 
                   {/* Nivel */}
                   <td style={{ padding: "13px 16px" }}>
-                    <Badge label={q.nivel} color={NIVEL_COLORS[q.nivel] ?? "#888"} />
+                    <Badge label={q.nivel} color={nivelColors[q.nivel] ?? tokens.textMuted} />
                   </td>
 
                   {/* Tipo */}
                   <td style={{ padding: "13px 16px" }}>
-                    <Badge label={q.tipo} color={TIPO_COLORS[q.tipo] ?? "#888"} />
+                    <Badge label={TIPO_LABELS[q.tipo]} color={tipoColors[q.tipo] ?? tokens.textMuted} />
                   </td>
 
                   {/* Tiempo */}
-                  <td style={{ padding: "13px 16px", color: T.textMuted, fontSize: 13 }}>
+                  <td style={{ padding: "13px 16px", color: tokens.textMuted, fontSize: 13 }}>
                     {q.tiempo_estimado_min} min
                   </td>
 
-                  {/* Estado toggle */}
+                  {/* Origen */}
                   <td style={{ padding: "13px 16px" }}>
-                    <button
-                      onClick={() => handleToggleActive(q.id, q.activa)}
-                      disabled={toggling === q.id}
-                      style={{ display: "flex", alignItems: "center", gap: 5, background: q.activa ? "rgba(0,201,107,0.1)" : "rgba(239,68,68,0.1)", border: "none", borderRadius: 99, padding: "4px 10px", cursor: toggling === q.id ? "not-allowed" : "pointer", color: q.activa ? "#00c96b" : "#f87171", fontSize: 11, fontWeight: 600, fontFamily: "inherit", opacity: toggling === q.id ? 0.6 : 1 }}
-                    >
-                      {toggling === q.id
-                        ? <Spinner size={11} color={q.activa ? "#00c96b" : "#f87171"} />
-                        : <i className={`ti ${q.activa ? "ti-circle-check" : "ti-circle-x"}`} style={{ fontSize: 13 }} />
-                      }
-                      {q.activa ? "Activa" : "Inactiva"}
-                    </button>
+                    {q.generada_por_ia ? (
+                      <span style={{ fontSize: 12, color: tokens.info }}>
+                        <i className="ti ti-robot" style={{ fontSize: 12, marginRight: 4 }} />
+                        IA Adaptativa
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 12, color: tokens.textFaint }}>
+                        <i className="ti ti-user" style={{ fontSize: 12, marginRight: 4 }} />
+                        Manual
+                      </span>
+                    )}
                   </td>
 
-                  {/* Acciones */}
+                  {/* Acción */}
                   <td style={{ padding: "13px 16px" }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        title="Editar"
-                        style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: T.textMuted, fontSize: 14 }}
-                      >
-                        <i className="ti ti-pencil" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(q.id)}
-                        disabled={deleting === q.id}
-                        title="Desactivar"
-                        style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 7, padding: "5px 8px", cursor: deleting === q.id ? "not-allowed" : "pointer", color: T.danger, fontSize: 14, opacity: deleting === q.id ? 0.5 : 1 }}
-                      >
-                        {deleting === q.id ? <Spinner size={13} color={T.danger} /> : <i className="ti ti-trash" />}
-                      </button>
-                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedPregunta(q); }}
+                      style={{ background: "none", border: `1px solid ${tokens.border}`, borderRadius: 7, padding: "5px 8px", cursor: "pointer", color: tokens.accent, fontSize: 13 }}
+                    >
+                      <i className="ti ti-eye" style={{ marginRight: 4 }} />
+                      Ver
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+
+        {/* Pie de página informativo */}
+        <div style={{ marginTop: 20, padding: "12px 16px", background: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 10, textAlign: "center" }}>
+          <p style={{ margin: 0, fontSize: 12, color: tokens.textFaint }}>
+            <i className="ti ti-info-circle" style={{ fontSize: 13, marginRight: 6, verticalAlign: "middle" }} />
+            Las preguntas son generadas automáticamente por el sistema de IA adaptativa basado en el desempeño de los candidatos.
+            Los administradores tienen acceso de solo lectura para monitorear el banco de preguntas.
+          </p>
+        </div>
       </div>
 
-      {/* Modal nueva pregunta */}
-      {showModal && (
-        <ModalNuevaPregunta
-          onClose={() => setShowModal(false)}
-          onCreated={handleCreated}
-          tecnologias={tecnologias}
-          niveles={niveles}
+      {/* Modal de detalle */}
+      {selectedPregunta && (
+        <DetailModal
+          pregunta={selectedPregunta}
+          onClose={() => setSelectedPregunta(null)}
+          tokens={tokens}
         />
       )}
 

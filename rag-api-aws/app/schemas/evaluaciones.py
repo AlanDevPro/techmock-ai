@@ -12,7 +12,7 @@ Cubre:
 from typing import Dict, List, Optional, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 # ──────────────────────────────────────────────────────────────
@@ -175,44 +175,103 @@ class RecomendacionSolucion(Recomendacion):
 # REQUEST: POST /codigo/analizar
 # ──────────────────────────────────────────────────────────────
 
-class SolicitudAnalisisCodigo(BaseModel):
-    """Body tipado para el endpoint POST /codigo/analizar."""
-
-    codigo: str = Field(..., min_length=1, description="Código del candidato a evaluar")
-    framework: str = Field(
-        "general", description="Framework del código (vue, react, nextjs, typescript, general)"
+class SolicitudFinalizarCodigo(BaseModel):
+    """Schema validado para POST /codigo/finalizar"""
+    
+    sesion_id: str = Field(..., description="UUID de la sesión")
+    codigo: str = Field(..., min_length=1, description="Código fuente a evaluar")
+    lenguaje: str = Field(default="general", description="Framework/lenguaje usado")
+    motivo_cierre: Literal["enviado", "tiempo_agotado"] = Field(
+        default="enviado", 
+        description="Motivo del cierre"
     )
-    sesion_id: Optional[UUID] = Field(None, description="UUID de la sesión activa")
-    usuario_id: Optional[UUID] = Field(None, description="UUID del usuario autenticado")
-
-    # Contexto del IDE (multi-archivo)
-    active_file: Optional[str] = Field(
-        "", description="Nombre del archivo activo en el IDE"
-    )
-    files: Optional[Dict[str, str]] = Field(
-        default_factory=dict,
-        description="Mapa de archivos del proyecto {nombre_archivo: contenido}",
-    )
-
-    # Flags de comportamiento
-    es_envio_final: bool = Field(
-        False,
-        description=(
-            "True si es el envío definitivo del candidato. "
-            "Dispara evaluación completa y cierre de sesión."
-        ),
-    )
-
+    active_file: Optional[str] = Field(None, description="Archivo activo en el IDE")
+    files: Optional[Dict[str, str]] = Field(None, description="Mapa de archivos del proyecto")
+    
+    @validator('lenguaje', pre=True, always=True)
+    def normalize_lenguaje(cls, v):
+        """Normaliza y valida el nombre del lenguaje/framework"""
+        if not v:
+            return "general"
+        
+        # Mapeo de valores comunes (consistente con FRAMEWORK_MAP del router)
+        mapping = {
+            # Vue
+            "vue": "Vue.js",
+            "vuejs": "Vue.js",
+            "vue.js": "Vue.js",
+            # Next
+            "next": "Next.js",
+            "nextjs": "Next.js",
+            "next.js": "Next.js",
+            # React
+            "react": "React",
+            "reactjs": "React",
+            "react.js": "React",
+            # JavaScript
+            "javascript": "JavaScript",
+            "js": "JavaScript",
+            # TypeScript
+            "typescript": "TypeScript",
+            "ts": "TypeScript",
+            # CSS
+            "css": "CSS",
+            # Node
+            "nodejs": "Node.js",
+            "node": "Node.js",
+        }
+        
+        normalized = mapping.get(v.strip().lower(), v.strip())
+        
+        # Validar que el resultado sea uno de los permitidos
+        allowed = ["Vue.js", "Next.js", "React", "JavaScript", "TypeScript", "CSS", "Node.js", "general"]
+        if normalized not in allowed:
+            # Log de advertencia pero no fallar, usar default
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Framework no reconocido: '{v}', usando 'general'")
+            return "general"
+        
+        return normalized
+    
+    @validator('sesion_id')
+    def validate_sesion_id(cls, v):
+        """Valida que el sesion_id sea un UUID válido"""
+        if not v:
+            raise ValueError("sesion_id es requerido")
+        
+        try:
+            UUID(v)
+        except ValueError:
+            raise ValueError(f"sesion_id debe ser un UUID válido, recibido: {v}")
+        
+        return v
+    
+    @validator('codigo')
+    def validate_codigo(cls, v):
+        """Valida que el código no esté vacío"""
+        if not v or not v.strip():
+            raise ValueError("codigo no puede estar vacío")
+        
+        # Limitar longitud (opcional)
+        max_length = 100000  # 100KB
+        if len(v) > max_length:
+            raise ValueError(f"codigo excede el límite de {max_length} caracteres")
+        
+        return v
+    
     class Config:
         json_schema_extra = {
             "example": {
-                "codigo": "const fetchData = async () => { const res = await fetch('/api'); ... }",
-                "framework": "vue",
-                "sesion_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-                "usuario_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                "active_file": "App.vue",
-                "files": {"App.vue": "<template>...</template>", "store.js": "..."},
-                "es_envio_final": False,
+                "sesion_id": "cfc38d58-ea7a-4966-a125-42e990c5cbc9",
+                "codigo": "console.log('Hello World');",
+                "lenguaje": "javascript",
+                "motivo_cierre": "enviado",
+                "active_file": "main.js",
+                "files": {
+                    "main.js": "console.log('Hello');",
+                    "utils.js": "export const add = (a,b) => a+b;"
+                }
             }
         }
 

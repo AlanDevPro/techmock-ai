@@ -11,6 +11,7 @@ import {
 // ─────────────────────────────────────────────
 
 export interface StatCard {
+  id: string; // ✅ Añadido: id único para cada tarjeta
   label: string;
   value: string | number;
   sub: string;
@@ -53,35 +54,40 @@ const FALLBACK_COLORS = [
 export const estadisticasService = {
   /**
    * Convierte DashboardStats en tarjetas listas para renderizar.
+   * Cada tarjeta tiene un id único para uso en listas de React.
    */
   buildStatCards(stats: DashboardStats): StatCard[] {
     return [
       {
-        label:  "Usuarios activos",
-        value:  stats.active_users,
-        sub:    "Total registrados activos",
-        icon:   "ti-users",
+        id: "active-users",
+        label: "Usuarios activos",
+        value: stats.active_users,
+        sub: "Total registrados activos",
+        icon: "ti-users",
         accent: "#00c96b",
       },
       {
-        label:  "Entrevistas hoy",
-        value:  stats.today_interviews,
-        sub:    "Sesiones iniciadas hoy",
-        icon:   "ti-video",
+        id: "today-interviews",
+        label: "Entrevistas hoy",
+        value: stats.today_interviews,
+        sub: "Sesiones iniciadas hoy",
+        icon: "ti-video",
         accent: "#3b82f6",
       },
       {
-        label:  "Preguntas en BD",
-        value:  stats.questions_count,
-        sub:    "Total de preguntas",
-        icon:   "ti-help-circle",
+        id: "questions-count",
+        label: "Preguntas en BD",
+        value: stats.questions_count,
+        sub: "Total de preguntas",
+        icon: "ti-help-circle",
         accent: "#a855f7",
       },
       {
-        label:  "Puntaje promedio",
-        value:  stats.average_score?.toFixed(1) ?? "—",
-        sub:    "Global de sesiones",
-        icon:   "ti-chart-bar",
+        id: "average-score",
+        label: "Puntaje promedio",
+        value: stats.average_score?.toFixed(1) ?? "—",
+        sub: "Global de sesiones",
+        icon: "ti-chart-bar",
         accent: "#f59e0b",
       },
     ];

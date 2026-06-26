@@ -1,0 +1,53 @@
+# ============================================================
+# .dockerignore — Editor de Código
+# ============================================================
+
+# Dependencias (se reinstalan en el build)
+node_modules/
+npm-debug.log*
+
+# Build local
+.next/
+out/
+dist/
+
+# Variables de entorno (NO van a la imagen)
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# Docs / configs de desarrollo
+README.md
+AGENTS.md
+CLAUDE.md
+*.md
+
+# Tests
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Docker (no se necesitan dentro de la imagen)
+docker-compose*.yml
+Dockerfile*

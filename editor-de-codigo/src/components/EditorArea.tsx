@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import dynamic from "next/dynamic";
 import { updateFile } from "@/lib/webcontainer";
 import { useTheme } from "./IDE";
@@ -19,6 +19,7 @@ interface EditorAreaProps {
   fileSystem: { [key: string]: string };
   onCursorChange?: (line: number, column: number) => void;
   onContentChange?: (file: string, content: string) => void;
+  onSelectFile?: (file: string) => void;
 }
 
 const getFileIcon = (filename: string) => {
@@ -49,44 +50,93 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ),
 });
 
-export default function EditorArea({
+const EditorArea = memo(function EditorArea({
   activeFile,
   fileSystem,
   onCursorChange,
   onContentChange,
+  onSelectFile,
 }: EditorAreaProps) {
   const { theme } = useTheme();
   const [content, setContent] = useState("");
   const [openTabs, setOpenTabs] = useState<string[]>([activeFile]);
   const saveTimerRef = useRef<number | null>(null);
+  const editorRef = useRef<any>(null);
+  const isInternalUpdate = useRef(false);
+  const isUserTyping = useRef(false);
+  const lastSavedContent = useRef("");
 
+  // 🔥 OBTENER EL CONTENIDO ACTUAL DEL SISTEMA DE ARCHIVOS
+  const getCurrentContent = useCallback(() => {
+    return fileSystem[activeFile] || "";
+  }, [fileSystem, activeFile]);
+
+  // 🔥 ACTUALIZAR CONTENIDO CUANDO CAMBIA EL ARCHIVO (NO cuando cambia fileSystem)
   useEffect(() => {
+    const newContent = getCurrentContent();
+    
+    // Solo actualizar si el archivo cambió y no estamos en medio de una escritura
+    if (!isUserTyping.current && newContent !== content) {
+      console.log(`📄 EditorArea - Actualizando contenido para: ${activeFile}`);
+      setContent(newContent);
+    }
+    
+    // Agregar el archivo a las pestañas abiertas si no existe
     if (!openTabs.includes(activeFile)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenTabs((prev) => [...prev, activeFile]);
     }
-    if (fileSystem[activeFile] !== undefined) {
-      setContent(fileSystem[activeFile]);
-    } else {
-      setContent("");
-    }
-  }, [activeFile, fileSystem]);
+  }, [activeFile]); // 🔥 SOLO DEPENDE DE activeFile, NO de fileSystem
 
-  const handleEditorChange = (value: string | undefined) => {
-    if (value !== undefined) {
-      setContent(value);
-      onContentChange?.(activeFile, value);
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
+  // 🔥 EFECTO PARA SINCronizar EL EDITOR CON EL CONTENIDO (SOLO CUANDO CAMBIA EL ARCHIVO)
+  useEffect(() => {
+    if (editorRef.current && content !== undefined && !isUserTyping.current) {
+      const currentValue = editorRef.current.getValue();
+      // Solo actualizar si el contenido es diferente y no estamos escribiendo
+      if (currentValue !== content) {
+        isInternalUpdate.current = true;
+        editorRef.current.setValue(content);
+        isInternalUpdate.current = false;
       }
-      const timerId = window.setTimeout(() => {
-        updateFile(activeFile, value);
-      }, 300);
-      saveTimerRef.current = timerId;
     }
+  }, [content]); // 🔥 SOLO DEPENDE DE content
+
+  // 🔥 MANEJO DE CAMBIOS EN EL EDITOR - CORREGIDO
+  const handleEditorChange = (value: string | undefined) => {
+    if (value === undefined || isInternalUpdate.current) return;
+    
+    // Marcar que el usuario está escribiendo
+    isUserTyping.current = true;
+    
+    // Actualizar el estado local
+    setContent(value);
+    
+    // Debounce para guardar en WebContainer y fileSystem
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+    
+    // Guardar después de que el usuario deje de escribir (500ms)
+    const timerId = window.setTimeout(() => {
+      // Actualizar fileSystem
+      onContentChange?.(activeFile, value);
+      
+      // Guardar en WebContainer
+      updateFile(activeFile, value)
+        .then(() => {
+          console.log(`✅ Archivo ${activeFile} guardado correctamente`);
+          lastSavedContent.current = value;
+          // Desmarcar que el usuario está escribiendo DESPUÉS de guardar
+          isUserTyping.current = false;
+        })
+        .catch((error) => {
+          console.error(`❌ Error al guardar ${activeFile}:`, error);
+          isUserTyping.current = false;
+        });
+    }, 500); // 🔥 AUMENTADO A 500ms PARA MEJOR RENDIMIENTO
+    
+    saveTimerRef.current = timerId;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCursorPositionChange = (editor: any) => {
     const position = editor.getPosition();
     if (position && onCursorChange) {
@@ -94,9 +144,42 @@ export default function EditorArea({
     }
   };
 
+  // Cerrar pestaña
   const closeTab = (path: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setOpenTabs((prev) => prev.filter((t) => t !== path));
+    
+    if (openTabs.length <= 1) return;
+    
+    const newTabs = openTabs.filter((t) => t !== path);
+    setOpenTabs(newTabs);
+    
+    if (path === activeFile && newTabs.length > 0) {
+      const newActiveFile = newTabs[0];
+      const newContent = fileSystem[newActiveFile] || "";
+      setContent(newContent);
+      onSelectFile?.(newActiveFile);
+    }
+  };
+
+  // Seleccionar pestaña
+  const selectTab = (path: string) => {
+    if (path !== activeFile) {
+      // Si hay un timer de guardado pendiente, ejecutarlo antes de cambiar
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        const currentValue = editorRef.current?.getValue() || "";
+        if (currentValue !== lastSavedContent.current) {
+          onContentChange?.(activeFile, currentValue);
+          updateFile(activeFile, currentValue).catch(console.error);
+        }
+        saveTimerRef.current = null;
+      }
+      
+      const newContent = fileSystem[path] || "";
+      setContent(newContent);
+      isUserTyping.current = false;
+      onSelectFile?.(path);
+    }
   };
 
   const getLanguage = (file: string) => {
@@ -109,7 +192,6 @@ export default function EditorArea({
     return "plaintext";
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEditorWillMount = (monaco: any) => {
     const compilerOptions = {
       target: monaco.languages.typescript.ScriptTarget.Latest,
@@ -168,6 +250,7 @@ export default function EditorArea({
       className="flex flex-col h-full w-full"
       style={{ background: "var(--bg-primary)" }}
     >
+      {/* BARRA DE PESTAÑAS */}
       <div
         className="flex h-9 overflow-x-auto shrink-0 border-b items-end"
         style={{
@@ -181,9 +264,7 @@ export default function EditorArea({
           return (
             <div
               key={tab}
-              onClick={() => {
-                if (fileSystem[tab] !== undefined) setContent(fileSystem[tab]);
-              }}
+              onClick={() => selectTab(tab)}
               className="flex items-center gap-1.5 px-3 cursor-pointer group shrink-0 border-r transition-colors"
               style={{
                 height: "36px",
@@ -225,8 +306,10 @@ export default function EditorArea({
         </div>
       </div>
 
+      {/* EDITOR */}
       <div className="flex-1 w-full pt-1 relative">
         <MonacoEditor
+          key={activeFile} // Solo cambia cuando cambia el archivo, no el contenido
           height="100%"
           language={getLanguage(activeFile)}
           theme={theme === "dark" ? "vs-dark" : "vs"}
@@ -235,7 +318,30 @@ export default function EditorArea({
           beforeMount={handleEditorWillMount}
           path={activeFile}
           onMount={(editor) => {
+            editorRef.current = editor;
             editor.onDidChangeCursorPosition(() => handleCursorPositionChange(editor));
+            
+            // Asegurar que el contenido correcto se muestre al montar
+            const currentContent = getCurrentContent();
+            if (currentContent && editor.getValue() !== currentContent) {
+              isInternalUpdate.current = true;
+              editor.setValue(currentContent);
+              isInternalUpdate.current = false;
+              lastSavedContent.current = currentContent;
+            }
+            
+            editor.updateOptions({
+              automaticLayout: true,
+              tabSize: 2,
+              wordWrap: 'on',
+              minimap: { enabled: false },
+              scrollbar: { 
+                vertical: 'visible', 
+                horizontal: 'visible',
+                verticalScrollbarSize: 10,
+                horizontalScrollbarSize: 10,
+              },
+            });
           }}
           options={{
             minimap: { enabled: false },
@@ -248,9 +354,19 @@ export default function EditorArea({
             glyphMargin: false,
             folding: true,
             renderLineHighlight: "line",
+            automaticLayout: true,
+            tabSize: 2,
+            scrollbar: {
+              vertical: 'visible',
+              horizontal: 'visible',
+              verticalScrollbarSize: 10,
+              horizontalScrollbarSize: 10,
+            },
           }}
         />
       </div>
     </div>
   );
-}
+});
+
+export default EditorArea;

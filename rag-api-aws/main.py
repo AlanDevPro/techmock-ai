@@ -1,14 +1,15 @@
 """
 main.py
 
-Entry point de la RAG Interview API.
+Entry point de la RAG Interview API, unificado bajo el prefijo profesional /rag.
 
 Responsabilidades:
   - Crear la instancia FastAPI con lifespan
+  - Agrupar todo el sistema bajo el prefijo global /rag para el ALB
   - Registrar middlewares (CORS, TrustedHost, logging)
   - Registrar manejadores de error globales
-  - Registrar todos los routers via register_routes()
-  - Exponer endpoints de utilidad: /, /health, /info
+  - Registrar todos los routers de negocio y utilidad via rag_router
+  - Exponer endpoints de utilidad bajo la raíz /rag: /, /health, /info
 """
 
 from dotenv import load_dotenv
@@ -18,7 +19,7 @@ load_dotenv()  # Debe ejecutarse ANTES de cualquier import que use settings
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -36,15 +37,6 @@ from app.core.exceptions import register_exception_handlers
 async def lifespan(app: FastAPI):
     """
     Gestiona el ciclo de vida de la aplicación.
-
-    Startup (antes del yield):
-      1. Confirmar configuración LLM/Embeddings activa
-      2. Inicializar VectorStoreRetriever y conectar a OpenSearch
-      3. Verificar health del vector store
-
-    Shutdown (después del yield):
-      1. Cerrar conexiones de OpenSearch
-      2. Liberar recursos
     """
     print("\n🚀 Iniciando RAG Interview API...")
 
@@ -82,13 +74,13 @@ async def lifespan(app: FastAPI):
     vs = getattr(app.state, "vector_store", None)
     if vs is not None:
         await vs.close()
-        print("✅ Conexiones de OpenSearch cerradas.")
+        print("✅ Conexiones de OpenSearch closed.")
 
     print("👋 Shutdown completo.\n")
 
 
 # ──────────────────────────────────────────────────────────────
-# APLICACIÓN FASTAPI
+# APLICACIÓN FASTAPI (Mapeo Nativo de la Documentación bajo /rag)
 # ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -104,20 +96,11 @@ API para evaluación técnica de candidatos con RAG semántico y sistema adaptat
 - **Análisis de código**: evaluación en 5 pilares técnicos con feedback detallado
 - **Multi-proveedor LLM**: Groq, OpenAI, Anthropic, Ollama
 - **Multi-framework**: Vue.js, Next.js, React, TypeScript, JavaScript, CSS
-
-## Grupos de endpoints
-
-- `GET  /preguntas/generar/{framework}`        — Genera pregunta técnica vía RAG
-- `GET  /preguntas/iniciar-sesion/{framework}` — Crea sesión rápida (< 100ms)
-- `POST /codigo/analizar`                      — Analiza código del candidato
-- `POST /codigo/borrador`                      — Autosave del IDE
-- `GET  /usuario/{id}/perfil`                  — Perfil técnico histórico
-- `GET  /reclutador/candidatos`                — Panel del reclutador
     """,
-    # Docs solo en DEBUG para no exponer la API en producción
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    # 🔥 Forzamos a que Swagger y OpenAPI vivan exclusivamente dentro de la zona /rag
+    docs_url="/rag/docs" if settings.DEBUG else None,
+    redoc_url="/rag/redoc" if settings.DEBUG else None,
+    openapi_url="/rag/openapi.json" if settings.DEBUG else None,
     lifespan=lifespan,
 )
 
@@ -141,9 +124,10 @@ app.add_middleware(
         "http://localhost:4000",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
+        "http://98.93.201.10:8000"
     ],
     allow_credentials=True,
-    allow_methods=["*"],   # 👈 importante
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -183,17 +167,18 @@ async def log_requests(request: Request, call_next):
 
 
 # ──────────────────────────────────────────────────────────────
-# ROUTERS
+# ENRUTADOR PRINCIPAL (Microservicio RAG con Prefijo /rag)
 # ──────────────────────────────────────────────────────────────
 
-register_routes(app)
+# Creamos el router raíz que agrupa todo bajo /rag
+rag_router = APIRouter(prefix="/rag")
 
 
 # ──────────────────────────────────────────────────────────────
-# ENDPOINTS DE UTILIDAD
+# ENDPOINTS DE UTILIDAD (Mapeados bajo /rag)
 # ──────────────────────────────────────────────────────────────
 
-@app.get("/", tags=["health"], summary="Health check básico")
+@rag_router.get("/", tags=["health"], summary="Health check básico")
 async def root():
     """
     Retorna el estado general de la API y si RAG está activo.
@@ -213,7 +198,7 @@ async def root():
     }
 
 
-@app.get("/health", tags=["health"], summary="Health check detallado de todos los servicios")
+@rag_router.get("/health", tags=["health"], summary="Health check detallado de todos los servicios")
 async def health_check():
     """
     Retorna el estado de cada servicio: RAG (OpenSearch), LLM y API.
@@ -252,7 +237,7 @@ async def health_check():
     }
 
 
-@app.get("/info", tags=["utility"], summary="Información de configuración (solo DEBUG)")
+@rag_router.get("/info", tags=["utility"], summary="Información de configuración (solo DEBUG)")
 async def get_info():
     """
     Información detallada de la configuración activa.
@@ -292,6 +277,17 @@ async def get_info():
             "max_codigo_length": settings.MAX_CODIGO_LENGTH,
         },
     }
+
+
+# ──────────────────────────────────────────────────────────────
+# REGISTRO DE ROUTERS DE NEGOCIO EN EL RAG_ROUTER
+# ──────────────────────────────────────────────────────────────
+
+# 1. Ejecutamos tu función sobre el rag_router para inyectarle las rutas internas
+register_routes(rag_router)
+
+# 2. Finalmente incluimos el rag_router unificado dentro de la aplicación principal
+app.include_router(rag_router)
 
 
 # ──────────────────────────────────────────────────────────────

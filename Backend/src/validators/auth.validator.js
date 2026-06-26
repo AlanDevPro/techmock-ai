@@ -1,4 +1,4 @@
-// validators/auth.validator.js
+// 📁 validators/auth.validator.js
 import Joi from "joi";
 
 // ──────────────────────────────────────────────────────────
@@ -170,7 +170,7 @@ export const verifyEmailSchema = Joi.object({
 }).options({ stripUnknown: true });
 
 // ──────────────────────────────────────────────────────────
-// Esquemas de perfil de usuario
+// Esquemas de perfil de usuario - MEJORADO ✅
 // ──────────────────────────────────────────────────────────
 
 // PATCH /api/v1/usuarios/perfil - Actualizar perfil
@@ -180,6 +180,7 @@ export const updatePerfilSchema = Joi.object({
     .max(100)
     .pattern(/^[a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+$/)
     .optional()
+    .allow('')
     .messages({
       "string.min": "El nombre debe tener al menos 2 caracteres",
       "string.max": "El nombre no puede tener más de 100 caracteres",
@@ -190,6 +191,7 @@ export const updatePerfilSchema = Joi.object({
     .max(100)
     .pattern(/^[a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+$/)
     .optional()
+    .allow('')
     .messages({
       "string.min": "El apellido debe tener al menos 2 caracteres",
       "string.max": "El apellido no puede tener más de 100 caracteres",
@@ -198,30 +200,62 @@ export const updatePerfilSchema = Joi.object({
   avatar_url: Joi.string()
     .uri()
     .optional()
+    .allow('', null)
     .messages({
       "string.uri": "Debe ser una URL válida",
     }),
+  // ✅ MODIFICADO: Aceptar solo el nombre de usuario de GitHub (sin URL completa)
+  // Ejemplo válido: "alanDevPro", "john-doe", "user123"
   github_url: Joi.string()
-    .uri()
-    .pattern(/^(https?:\/\/)?(www\.)?github\.com\/[A-Za-z0-9_-]+$/)
     .optional()
+    .allow('', null)
+    .pattern(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/)
     .messages({
-      "string.uri": "Debe ser una URL válida",
-      "string.pattern.base": "Debe ser una URL válida de GitHub",
+      "string.pattern.base": "Debe ser un nombre de usuario de GitHub válido (solo letras, números y guiones, máximo 39 caracteres)",
     }),
+  // ✅ MODIFICADO: Aceptar solo el nombre de usuario de LinkedIn (sin URL completa)
+  // Ejemplo válido: "john-doe", "johndoe123", "john_doe"
   linkedin_url: Joi.string()
-    .uri()
-    .pattern(/^(https?:\/\/)?(www\.)?linkedin\.com\/(in|company)\/[A-Za-z0-9_-]+$/)
     .optional()
+    .allow('', null)
+    .pattern(/^[A-Za-z0-9-]{5,100}$/)
     .messages({
-      "string.uri": "Debe ser una URL válida",
-      "string.pattern.base": "Debe ser una URL válida de LinkedIn",
+      "string.pattern.base": "Debe ser un nombre de usuario de LinkedIn válido (solo letras, números y guiones, mínimo 5 caracteres)",
     }),
   telefono: Joi.string()
     .pattern(/^\+?[0-9\s\-\(\)]{8,20}$/)
     .optional()
+    .allow('', null)
     .messages({
       "string.pattern.base": "Debe ser un número de teléfono válido",
+    }),
+  bio: Joi.string()
+    .max(500)
+    .optional()
+    .allow('', null)
+    .messages({
+      "string.max": "La biografía no puede tener más de 500 caracteres",
+    }),
+  website: Joi.string()
+    .uri()
+    .optional()
+    .allow('', null)
+    .messages({
+      "string.uri": "Debe ser una URL válida",
+    }),
+  location: Joi.string()
+    .max(100)
+    .optional()
+    .allow('', null)
+    .messages({
+      "string.max": "La ubicación no puede tener más de 100 caracteres",
+    }),
+  twitter: Joi.string()
+    .pattern(/^@?[A-Za-z0-9_]{1,15}$/)
+    .optional()
+    .allow('', null)
+    .messages({
+      "string.pattern.base": "Debe ser un nombre de usuario de Twitter válido (ej: @usuario o usuario)",
     }),
 }).min(1).messages({
   "object.min": "Debes enviar al menos un campo para actualizar",

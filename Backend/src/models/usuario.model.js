@@ -1,4 +1,4 @@
-// models/usuario.model.js
+// 📁 models/usuario.model.js
 import { db } from "../config/database.js";
 
 export const UsuarioModel = {
@@ -47,7 +47,7 @@ export const UsuarioModel = {
       const usuario = upsertUsuario.rows[0];
 
       // 2. Manejo profesional de providers
-      
+
       // Intentar encontrar si ya existe ese provider_uid
       const existingProvider = await client.query(`
         SELECT * FROM auth_providers
@@ -64,7 +64,6 @@ export const UsuarioModel = {
 
       } else {
         // No existe → intentar insertar
-
         try {
           await client.query(`
             INSERT INTO auth_providers (user_id, provider, provider_uid)
@@ -148,9 +147,20 @@ export const UsuarioModel = {
   },
 
   /**
-   * Actualizar perfil del usuario
+   * Actualizar perfil del usuario - VERSIÓN COMPLETA CON NUEVOS CAMPOS
    */
-  async updatePerfil(id, { nombre, apellido, github_url, linkedin_url, telefono, avatar_url }) {
+  async updatePerfil(id, {
+    nombre,
+    apellido,
+    github_url,
+    linkedin_url,
+    telefono,
+    avatar_url,
+    bio,
+    website,
+    location,
+    twitter
+  }) {
     const result = await db.query(`
       UPDATE usuarios SET
         nombre       = COALESCE($2, nombre),
@@ -159,15 +169,30 @@ export const UsuarioModel = {
         linkedin_url = COALESCE($5, linkedin_url),
         telefono     = COALESCE($6, telefono),
         avatar_url   = COALESCE($7, avatar_url),
+        bio          = COALESCE($8, bio),
+        website      = COALESCE($9, website),
+        location     = COALESCE($10, location),
+        twitter      = COALESCE($11, twitter),
         updated_at   = NOW()
       WHERE id = $1
-      RETURNING id, nombre, apellido, email, avatar_url, github_url, linkedin_url, telefono, rol
-    `, [id, nombre, apellido, github_url, linkedin_url, telefono, avatar_url]);
+      RETURNING id, nombre, apellido, email, avatar_url, github_url,
+                linkedin_url, telefono, bio, website, location, twitter, rol
+    `, [id, nombre, apellido, github_url, linkedin_url, telefono, avatar_url,
+        bio, website, location, twitter]);
     return result.rows[0] || null;
   },
 
   // ── ADMIN ──────────────────────────────────────────────────────────────
 
+  /**
+   * Lista todos los developers para el panel admin.
+   * NOTA: se usa LEFT JOIN LATERAL en vez de GROUP BY con columnas de
+   * estadisticas_usuario, porque estadisticas_usuario.usuario_id es UNIQUE
+   * (1 fila por usuario) — no hace falta agregar nada de esa tabla y
+   * forzar un GROUP BY extra solo agrega trabajo innecesario al planner.
+   * Los providers sí necesitan ARRAY_AGG porque un usuario puede tener
+   * varios (google + github + password).
+   */
   async getAllDevelopers() {
     const result = await db.query(`
       SELECT
@@ -185,27 +210,23 @@ export const UsuarioModel = {
         u.fecha_creacion,
         u.ultimo_login,
 
-        COALESCE(
-          ARRAY_AGG(DISTINCT ap.provider)
-          FILTER (WHERE ap.provider IS NOT NULL),
-          '{}'
-        ) AS providers,
+        COALESCE(providers.lista, '{}') AS providers,
 
         e.total_entrevistas,
         e.puntaje_promedio
 
       FROM usuarios u
 
-      LEFT JOIN auth_providers ap
-        ON ap.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG(DISTINCT ap.provider) AS lista
+        FROM auth_providers ap
+        WHERE ap.user_id = u.id
+      ) providers ON TRUE
 
       LEFT JOIN estadisticas_usuario e
         ON e.usuario_id = u.id
 
-      GROUP BY
-        u.id,
-        e.total_entrevistas,
-        e.puntaje_promedio
+      WHERE u.rol = 'developer'
 
       ORDER BY u.fecha_creacion DESC
     `);
@@ -213,14 +234,12 @@ export const UsuarioModel = {
     return result.rows;
   },
 
-
-
-
   async getFullProfile(id) {
     const result = await db.query(`
       SELECT
         u.id, u.nombre, u.apellido, u.email, u.avatar_url,
         u.github_url, u.linkedin_url, u.telefono, u.activo,
+        u.bio, u.website, u.location, u.twitter,
         u.fecha_creacion, u.ultimo_login,
         e.total_entrevistas, e.entrevistas_finalizadas, e.entrevistas_abandonadas,
         e.puntaje_promedio, e.mejor_puntaje, e.peor_puntaje,

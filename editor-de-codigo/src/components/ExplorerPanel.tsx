@@ -43,6 +43,37 @@ const getIcon = (filename: string) => {
 
 type FileTreeData = { [key: string]: string | FileTreeData };
 
+// Tipo para el constructor del árbol estático
+type TreeNode = { [key: string]: TreeNode | string };
+
+/**
+ * SOLUCIÓN PROFESIONAL: Extraer la función pura buildTree fuera del componente.
+ * Esto evita recrear la función en cada renderizado y resuelve los conflictos de dependencias
+ * detectados por el React Compiler.
+ */
+const buildTree = (filePaths: string[], filesMap: { [key: string]: string }) => {
+  const root: TreeNode = {};
+  for (const path of filePaths) {
+    const parts = path.split("/").filter(Boolean);
+    let current = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (i === parts.length - 1) {
+        if (filesMap[path] === "DIRECTORY:") {
+          if (!current[part]) current[part] = {};
+        } else {
+          current[part] = path;
+        }
+      } else {
+        if (!current[part] || typeof current[part] === "string")
+          current[part] = {};
+        current = current[part] as TreeNode;
+      }
+    }
+  }
+  return root;
+};
+
 interface FileTreeProps {
   data: FileTreeData;
   level?: number;
@@ -62,7 +93,7 @@ interface FileTreeProps {
   onRenameSubmit: (oldPath: string, newName: string) => void;
   onRenameCancel: () => void;
   deletingPaths: Record<string, boolean>;
-};
+}
 
 const FileTree = ({
   data,
@@ -272,7 +303,7 @@ const FileTree = ({
 
               {isFolder && isExpanded && (
                 <FileTree
-                  data={value}
+                  data={value as FileTreeData}
                   level={level + 1}
                   activeFile={activeFile}
                   onSelectFile={onSelectFile}
@@ -333,32 +364,8 @@ export default function ExplorerPanel({
   const [clipboard, setClipboard] = useState<{ path: string } | null>(null);
   const [deletingPaths, setDeletingPaths] = useState<Record<string, boolean>>({});
 
-  type TreeNode = { [key: string]: TreeNode | string };
-
-  const buildTree = (filePaths: string[]) => {
-    const root: TreeNode = {};
-    for (const path of filePaths) {
-      const parts = path.split("/").filter(Boolean);
-      let current = root;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (i === parts.length - 1) {
-          if (files[path] === "DIRECTORY:") {
-            if (!current[part]) current[part] = {};
-          } else {
-            current[part] = path;
-          }
-        } else {
-          if (!current[part] || typeof current[part] === "string")
-            current[part] = {};
-          current = current[part];
-        }
-      }
-    }
-    return root;
-  };
-
   const filePaths = useMemo(() => Object.keys(files), [files]);
+  
   const filteredPaths = useMemo(() => (
     visibleRoot
       ? filePaths.filter(
@@ -367,10 +374,13 @@ export default function ExplorerPanel({
         )
       : filePaths
   ), [filePaths, visibleRoot]);
-  const treeData = useMemo(() => buildTree(filteredPaths), [filteredPaths]);
+
+  // Modificado para usar buildTree externo pasando la dependencia `files` de forma explícita
+  const treeData = useMemo(() => buildTree(filteredPaths, files), [filteredPaths, files]);
 
   useEffect(() => {
     if (visibleRoot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpandedFolders({ [visibleRoot]: true });
       setSelectedDir(visibleRoot);
     }
@@ -396,39 +406,81 @@ export default function ExplorerPanel({
     dir: string
   ) => {
     if (!name.trim()) return;
+    
     const container = getWebContainer();
-    if (container) {
-      const fullPath = dir ? `${dir}/${name}` : `/${name}`;
-      if (files[fullPath]) {
-        alert("Ya existe un archivo o carpeta con ese nombre.");
-        setCreating(null);
-        return;
-      }
-      try {
-        if (type === "file") {
-          await container.fs.writeFile(fullPath, "");
-          onSelectFile(fullPath);
-        } else {
-          await container.fs.mkdir(fullPath, { recursive: true });
-        }
+    if (!container) {
+      alert("WebContainer no está disponible");
+      setCreating(null);
+      return;
+    }
+  
+    const fullPath = dir ? `${dir}/${name}` : `/${name}`;
+    console.log(`📄 [ExplorerPanel] Creando: ${fullPath} (tipo: ${type})`);
+  
+    if (files[fullPath] !== undefined) {
+      alert("Ya existe un archivo o carpeta con ese nombre.");
+      setCreating(null);
+      return;
+    }
+  
+    try {
+      if (type === "file") {
+        console.log(`📝 [ExplorerPanel] Escribiendo archivo vacío...`);
+        await container.fs.writeFile(fullPath, "");
+        console.log(`✅ [ExplorerPanel] Archivo creado en WebContainer`);
+      
+        console.log(`📁 [ExplorerPanel] Actualizando fileSystem local...`);
+        onFsUpdate((prev) => {
+          const newState = {
+            ...prev,
+            [fullPath]: "", 
+          };
+          console.log(`📁 [ExplorerPanel] Nuevo fileSystem:`, Object.keys(newState));
+          return newState;
+        });
+      
+        await new Promise(resolve => setTimeout(resolve, 200));
+      
+        console.log(`🔄 [ExplorerPanel] Refrescando fileSystem...`);
+        onRefresh();
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
+      
+        console.log(`📂 [ExplorerPanel] Abriendo archivo: ${fullPath}`);
+        onSelectFile(fullPath);
+      
+      } else {
+        await container.fs.mkdir(fullPath, { recursive: true });
         onFsUpdate((prev) => ({
           ...prev,
-          [fullPath]: type === "folder" ? "DIRECTORY:" : "",
+          [fullPath]: "DIRECTORY:",
         }));
-      } catch (e) {
-        console.error("Error creating item:", e);
+        onRefresh();
       }
+    
+      console.log(`✅ [ExplorerPanel] Proceso completado exitosamente`);
+    
+    } catch (e) {
+      console.error("❌ [ExplorerPanel] Error creating item:", e);
+      alert(`Error al crear ${type === 'file' ? 'archivo' : 'carpeta'}: ${e}`);
     }
+  
     setCreating(null);
   };
 
   const handleDeleteNode = async (path: string) => {
+    if (!path || path === "/" || path === "") {
+      alert("No se puede eliminar la raíz del sistema");
+      return;
+    }
+    
     if (
       !window.confirm(
         `¿Estás seguro de eliminar '${path}'? Esta acción no se puede deshacer.`
       )
     )
       return;
+      
     const container = getWebContainer();
     if (container) {
       try {
@@ -444,19 +496,33 @@ export default function ExplorerPanel({
           });
           return next;
         });
+        onRefresh();
         setDeletingPaths((prev) => {
           const next = { ...prev };
           delete next[path];
           return next;
         });
       } catch (e) {
-        console.error("Error deleting item", e);
+        console.error("Error deleting item:", e);
+        alert(`Error al eliminar: ${e}`);
+        setDeletingPaths((prev) => {
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
       }
     }
   };
 
   const handleRenameSubmit = async (oldPath: string, newName: string) => {
     if (!newName.trim()) return;
+    
+    if (!/^[a-zA-Z0-9_\-\.]+$/.test(newName)) {
+      alert("El nombre solo puede contener letras, números, guiones, puntos y guiones bajos");
+      setRenaming(null);
+      return;
+    }
+    
     const parts = oldPath.split("/");
     const oldName = parts.pop();
     if (oldName === newName) {
@@ -496,8 +562,10 @@ export default function ExplorerPanel({
           return next;
         });
         if (activeFile === oldPath) onSelectFile(newPath);
+        onRefresh();
       } catch (e) {
-        console.error("Error renaming", e);
+        console.error("Error renaming:", e);
+        alert(`Error al renombrar: ${e}`);
       }
     }
     setRenaming(null);
@@ -572,8 +640,10 @@ export default function ExplorerPanel({
           }
           return next;
         });
+        onRefresh();
       } catch (e) {
-        console.error("Error pasting", e);
+        console.error("Error pasting:", e);
+        alert(`Error al pegar: ${e}`);
       }
     }
     setContextMenu(null);
@@ -652,7 +722,7 @@ export default function ExplorerPanel({
         }}
       >
         <FileTree
-          data={treeData}
+          data={treeData as FileTreeData}
           activeFile={activeFile}
           onSelectFile={onSelectFile}
           currentPath=""

@@ -9,7 +9,7 @@ import {
   revocarTodosLosTokens,
 } from "./token.service.js";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { sendResetPasswordEmail } from "./email.service.js";
 
 // ── Google / GitHub vía Firebase ──────────────────────────────────────
@@ -135,30 +135,53 @@ export async function logoutAllDevices(usuarioId) {
 
 // ── Recuperación de contraseña ────────────────────────────────────────
 export async function forgotPassword(email) {
-  const usuario = await UsuarioModel.findByEmail(email.trim().toLowerCase());
+  // Respuesta genérica para no revelar si el email existe o no
+  const genericResponse = {
+    success: true,
+    message: "Si el correo existe, se enviará un enlace",
+  };
 
-  if (!usuario) {
-    return { success: true, message: "Si el correo existe, se enviará un enlace" };
+  try {
+    const usuario = await UsuarioModel.findByEmail(email);
+
+    // No revelamos si el usuario existe
+    if (!usuario) {
+      return genericResponse;
+    }
+
+    // Solo aplica para cuentas con contraseña (no Google/GitHub)
+    const authProvider = await AuthProviderModel.findByUserAndProvider(
+      usuario.id,
+      "password"
+    );
+
+    if (!authProvider) {
+      return genericResponse;
+    }
+
+    // Generar JWT firmado exclusivamente para reset de contraseña
+    const resetToken = jwt.sign(
+      {
+        userId: usuario.id,
+        email: usuario.email,
+        purpose: "reset-password",
+      },
+      process.env.JWT_RESET_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+    await sendResetPasswordEmail(usuario.email, resetLink);
+
+    return genericResponse;
+  } catch (error) {
+    // No exponer detalles internos al cliente
+    throw Object.assign(
+      new Error("Error al procesar la solicitud"),
+      { status: 500 }
+    );
   }
-
-  const authProvider = await AuthProviderModel.findByUserAndProvider(usuario.id, "password");
-  if (!authProvider) {
-    return { success: true, message: "Si el correo existe, se enviará un enlace" };
-  }
-
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = await bcrypt.hash(rawToken, 10);
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
-
-  await db.query(
-    `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
-    [usuario.id, tokenHash, expiresAt]
-  );
-
-  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`;
-  await sendResetPasswordEmail(usuario.email, resetLink);
-
-  return { success: true, message: "Si el correo existe, se enviará un enlace" };
 }
 
 // ── Resetear contraseña ───────────────────────────────────────────────
@@ -170,41 +193,46 @@ export async function resetPassword(token, newPassword) {
     );
   }
 
-  const result = await db.query(
-    `SELECT * FROM password_reset_tokens WHERE used = FALSE AND expires_at > NOW() ORDER BY created_at DESC`
-  );
-
-  let validToken = null;
-  for (const row of result.rows) {
-    const valid = await bcrypt.compare(token, row.token_hash);
-    if (valid) {
-      validToken = row;
-      break;
-    }
+  let payload;
+  try {
+    payload = jwt.verify(token, process.env.JWT_RESET_SECRET);
+  } catch {
+    throw Object.assign(new Error("Token inválido o expirado"), { status: 400 });
   }
 
-  if (!validToken) {
-    throw Object.assign(new Error("Token inválido o expirado"), { status: 400 });
+  // Validar que el purpose sea correcto
+  if (payload.purpose !== "reset-password") {
+    throw Object.assign(new Error("Token inválido"), { status: 400 });
+  }
+
+  // Verificar que el usuario sigue existiendo y el email coincide
+  const usuario = await UsuarioModel.findById(payload.userId);
+  if (!usuario || usuario.email !== payload.email) {
+    throw Object.assign(new Error("Token inválido"), { status: 400 });
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 12);
 
   await db.query(
-    `UPDATE auth_providers SET password_hash = $1, updated_at = NOW() WHERE user_id = $2 AND provider = 'password'`,
-    [passwordHash, validToken.user_id]
+    `UPDATE auth_providers
+     SET password_hash = $1, updated_at = NOW()
+     WHERE user_id = $2 AND provider = 'password'`,
+    [passwordHash, payload.userId]
   );
 
+  // Mantener consistencia con el esquema de usuarios
   await db.query(
-    `UPDATE password_reset_tokens SET used = TRUE WHERE id = $1`,
-    [validToken.id]
+    `UPDATE usuarios SET ultimo_acceso = NOW() WHERE id = $1`,
+    [payload.userId]
   );
 
-  await revocarTodosLosTokens(validToken.user_id);
+  // Invalida todas las sesiones activas por seguridad
+  await revocarTodosLosTokens(payload.userId);
 
   return { success: true, message: "Contraseña actualizada correctamente" };
 }
 
-// ── Set password para usuario OAuth ✅ NUEVO ──────────────────────────
+// ── Set password para usuario OAuth ──────────────────────────────────
 export async function setPasswordForOAuthUser(userId, password) {
   const existingProvider = await AuthProviderModel.findByUserAndProvider(userId, "password");
 

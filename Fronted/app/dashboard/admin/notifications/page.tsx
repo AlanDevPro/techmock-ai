@@ -1,48 +1,125 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useThemeContext } from "@/components/providers/ThemeProvider";
 import {
   notificationsService,
-  NotificationsError,
   TIPO_CONFIG,
   type Notif,
   type NotifTipo,
 } from "@/services/notifications.service";
 
-// ─── Tema ─────────────────────────────────────────────────────────────────────
+// ─── Tema basado en ThemeProvider ─────────────────────────────────────────────
 
-const T = {
-  dark: {
-    bg: "#111214",
-    surface: "#1a1c20",
-    surface2: "#20232a",
-    surfaceHover: "#22252b",
-    border: "rgba(255,255,255,0.08)",
-    text: "#e8eaed",
-    textMuted: "#8b8fa8",
-    textFaint: "#555868",
-    accent: "#00c96b",
-    accentBg: "rgba(0,201,107,0.1)",
-    danger: "#ef4444",
-    dangerBg: "rgba(239,68,68,0.1)",
-    warning: "#f59e0b",
-    warningBg: "rgba(245,158,11,0.1)",
-    searchBg: "rgba(255,255,255,0.06)",
-    searchBorder: "rgba(255,255,255,0.12)",
-  },
-};
+const getThemeTokens = (isDark: boolean) => ({
+  bg: isDark ? "#111214" : "#f0f2f5",
+  surface: isDark ? "#1a1c20" : "#ffffff",
+  surface2: isDark ? "#20232a" : "#f8f9fb",
+  surfaceHover: isDark ? "#22252b" : "#f0f2f5",
+  border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+  text: isDark ? "#e8eaed" : "#111214",
+  textMuted: isDark ? "#8b8fa8" : "#5f6478",
+  textFaint: isDark ? "#555868" : "#adb0be",
+  accent: isDark ? "#00c96b" : "#00a855",
+  accentBg: isDark ? "rgba(0,201,107,0.1)" : "rgba(0,168,85,0.08)",
+  danger: isDark ? "#ef4444" : "#dc2626",
+  dangerBg: isDark ? "rgba(239,68,68,0.1)" : "rgba(220,38,38,0.08)",
+  warning: isDark ? "#f59e0b" : "#d97706",
+  warningBg: isDark ? "rgba(245,158,11,0.1)" : "rgba(217,119,6,0.08)",
+  info: isDark ? "#3b82f6" : "#2563eb",
+  infoBg: isDark ? "rgba(59,130,246,0.1)" : "rgba(37,99,235,0.08)",
+  purple: isDark ? "#a855f7" : "#9333ea",
+  purpleBg: isDark ? "rgba(168,85,247,0.1)" : "rgba(147,51,234,0.08)",
+  searchBg: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+  searchBorder: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.1)",
+});
 
-type Theme = typeof T.dark;
+type ThemeTokens = ReturnType<typeof getThemeTokens>;
+
+// ─── CLASE DE ERROR PERSONALIZADA ─────────────────────────────────────────────
+
+/**
+ * Error personalizado para el módulo de notificaciones
+ * Permite un manejo más granular de errores en la capa de servicios
+ */
+export class NotificationsError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly statusCode?: number,
+    public readonly originalError?: unknown
+  ) {
+    super(message);
+    this.name = 'NotificationsError';
+    // Mantener el stack trace correcto
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, NotificationsError);
+    }
+  }
+
+  /**
+   * Crea un NotificationsError desde un error desconocido
+   */
+  static fromUnknown(err: unknown): NotificationsError {
+    if (err instanceof NotificationsError) {
+      return err;
+    }
+    
+    if (err instanceof Error) {
+      return new NotificationsError(err.message, 'UNKNOWN_ERROR', undefined, err);
+    }
+    
+    return new NotificationsError(
+      'Ocurrió un error inesperado al procesar la solicitud',
+      'UNKNOWN_ERROR',
+      undefined,
+      err
+    );
+  }
+
+  /**
+   * Determina si el error es de tipo "no autorizado"
+   */
+  isUnauthorized(): boolean {
+    return this.statusCode === 401 || this.statusCode === 403;
+  }
+
+  /**
+   * Determina si el error es de tipo "no encontrado"
+   */
+  isNotFound(): boolean {
+    return this.statusCode === 404;
+  }
+
+  /**
+   * Determina si el error es de tipo "timeout"
+   */
+  isTimeout(): boolean {
+    return this.code === 'TIMEOUT' || this.code === 'ECONNABORTED';
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
-  const h = Math.floor(diff / 3600000);
-  if (h < 1) return "hace menos de 1 h";
-  if (h < 24) return `hace ${h} h`;
-  const d = Math.floor(h / 24);
-  return `hace ${d} día${d > 1 ? "s" : ""}`;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return "hace un momento";
+  if (minutes < 60) return `hace ${minutes} min`;
+  if (hours < 24) return `hace ${hours} h`;
+  return `hace ${days} día${days > 1 ? "s" : ""}`;
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-BO", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -51,15 +128,17 @@ function timeAgo(iso: string) {
 function FilterPill({
   active,
   label,
+  count,
   onClick,
   color,
-  t,
+  tokens,
 }: {
   active: boolean;
   label: string;
+  count?: number;
   onClick: () => void;
   color: string;
-  t: Theme;
+  tokens: ThemeTokens;
 }) {
   return (
     <button
@@ -71,19 +150,36 @@ function FilterPill({
         fontWeight: 600,
         cursor: "pointer",
         background: active ? color + "20" : "transparent",
-        border: `1.5px solid ${active ? color : t.border}`,
-        color: active ? color : t.textMuted,
+        border: `1.5px solid ${active ? color : tokens.border}`,
+        color: active ? color : tokens.textMuted,
         transition: "all 0.15s",
         fontFamily: "inherit",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
       }}
     >
       {label}
+      {count !== undefined && count > 0 && (
+        <span
+          style={{
+            background: active ? color : tokens.surface2,
+            color: active ? "#fff" : tokens.textMuted,
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "2px 6px",
+            borderRadius: 99,
+          }}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
 /** Skeleton de carga */
-function LoadingSkeleton({ t }: { t: Theme }) {
+function LoadingSkeleton({ tokens }: { tokens: ThemeTokens }) {
   return (
     <div
       style={{
@@ -93,14 +189,13 @@ function LoadingSkeleton({ t }: { t: Theme }) {
         fontFamily: "'DM Sans', sans-serif",
       }}
     >
-      {/* Header skeleton */}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
           <div
             style={{
               height: 28,
               width: 200,
-              background: t.surface2,
+              background: tokens.surface2,
               borderRadius: 8,
               marginBottom: 8,
             }}
@@ -109,7 +204,7 @@ function LoadingSkeleton({ t }: { t: Theme }) {
             style={{
               height: 16,
               width: 240,
-              background: t.surface2,
+              background: tokens.surface2,
               borderRadius: 6,
             }}
           />
@@ -118,26 +213,25 @@ function LoadingSkeleton({ t }: { t: Theme }) {
           style={{
             height: 38,
             width: 200,
-            background: t.surface2,
+            background: tokens.surface2,
             borderRadius: 10,
           }}
         />
       </div>
 
-      {/* Stats skeleton */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(6, 1fr)",
           gap: 12,
         }}
       >
-        {[1, 2, 3, 4].map((i) => (
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <div
             key={i}
             style={{
-              background: t.surface,
-              border: `1px solid ${t.border}`,
+              background: tokens.surface,
+              border: `1px solid ${tokens.border}`,
               borderRadius: 12,
               padding: "14px 16px",
               height: 72,
@@ -146,7 +240,7 @@ function LoadingSkeleton({ t }: { t: Theme }) {
             <div
               style={{
                 height: "100%",
-                background: t.surface2,
+                background: tokens.surface2,
                 borderRadius: 8,
                 animation: "pulse 1.5s ease-in-out infinite",
               }}
@@ -155,7 +249,6 @@ function LoadingSkeleton({ t }: { t: Theme }) {
         ))}
       </div>
 
-      {/* Pills skeleton */}
       <div style={{ display: "flex", gap: 8 }}>
         {[80, 110, 80, 100, 90, 110].map((w, i) => (
           <div
@@ -163,7 +256,7 @@ function LoadingSkeleton({ t }: { t: Theme }) {
             style={{
               height: 32,
               width: w,
-              background: t.surface2,
+              background: tokens.surface2,
               borderRadius: 99,
               animation: "pulse 1.5s ease-in-out infinite",
             }}
@@ -171,14 +264,13 @@ function LoadingSkeleton({ t }: { t: Theme }) {
         ))}
       </div>
 
-      {/* List skeleton */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {[1, 2, 3, 4, 5].map((i) => (
           <div
             key={i}
             style={{
-              background: t.surface,
-              border: `1px solid ${t.border}`,
+              background: tokens.surface,
+              border: `1px solid ${tokens.border}`,
               borderRadius: 12,
               padding: "14px 16px",
               height: 88,
@@ -187,7 +279,7 @@ function LoadingSkeleton({ t }: { t: Theme }) {
             <div
               style={{
                 height: "100%",
-                background: t.surface2,
+                background: tokens.surface2,
                 borderRadius: 8,
                 animation: "pulse 1.5s ease-in-out infinite",
               }}
@@ -204,17 +296,17 @@ function LoadingSkeleton({ t }: { t: Theme }) {
 function ErrorBanner({
   message,
   onRetry,
-  t,
+  tokens,
 }: {
   message: string;
   onRetry: () => void;
-  t: Theme;
+  tokens: ThemeTokens;
 }) {
   return (
     <div
       style={{
-        background: t.dangerBg,
-        border: `1px solid ${t.danger}44`,
+        background: tokens.dangerBg,
+        border: `1px solid ${tokens.danger}44`,
         borderRadius: 12,
         padding: "1.1rem 1.25rem",
         display: "flex",
@@ -227,7 +319,7 @@ function ErrorBanner({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <i
           className="ti ti-alert-circle"
-          style={{ fontSize: 18, color: t.danger }}
+          style={{ fontSize: 18, color: tokens.danger }}
         />
         <div>
           <p
@@ -235,13 +327,13 @@ function ErrorBanner({
               margin: 0,
               fontSize: 13,
               fontWeight: 700,
-              color: t.danger,
+              color: tokens.danger,
             }}
           >
             Error al cargar notificaciones
           </p>
           <p
-            style={{ margin: "2px 0 0", fontSize: 12, color: t.textMuted }}
+            style={{ margin: "2px 0 0", fontSize: 12, color: tokens.textMuted }}
           >
             {message}
           </p>
@@ -250,9 +342,9 @@ function ErrorBanner({
       <button
         onClick={onRetry}
         style={{
-          background: t.dangerBg,
-          border: `1px solid ${t.danger}66`,
-          color: t.danger,
+          background: tokens.dangerBg,
+          border: `1px solid ${tokens.danger}66`,
+          color: tokens.danger,
           borderRadius: 8,
           padding: "7px 16px",
           cursor: "pointer",
@@ -268,22 +360,25 @@ function ErrorBanner({
   );
 }
 
-/** Toast de error inline para acciones (marcar, eliminar) */
+/** Toast de error inline para acciones */
 function ActionToast({
   message,
-  t,
+  type = "error",
+  tokens,
 }: {
   message: string;
-  t: Theme;
+  type?: "error" | "success";
+  tokens: ThemeTokens;
 }) {
+  const isError = type === "error";
   return (
     <div
       style={{
         position: "fixed",
         bottom: 24,
         right: 24,
-        background: t.dangerBg,
-        border: `1px solid ${t.danger}55`,
+        background: isError ? tokens.dangerBg : tokens.accentBg,
+        border: `1px solid ${isError ? tokens.danger : tokens.accent}55`,
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex",
@@ -291,15 +386,34 @@ function ActionToast({
         gap: 8,
         zIndex: 999,
         boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
+        animation: "slideIn 0.3s ease-out",
       }}
     >
       <i
-        className="ti ti-alert-circle"
-        style={{ fontSize: 16, color: t.danger }}
+        className={`ti ${isError ? "ti-alert-circle" : "ti-circle-check"}`}
+        style={{ fontSize: 16, color: isError ? tokens.danger : tokens.accent }}
       />
-      <span style={{ fontSize: 13, color: t.danger, fontWeight: 600 }}>
+      <span
+        style={{
+          fontSize: 13,
+          color: isError ? tokens.danger : tokens.accent,
+          fontWeight: 600,
+        }}
+      >
         {message}
       </span>
+      <style>{`
+        @keyframes slideIn {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -309,15 +423,14 @@ function EmptyState({
   readFilter,
   tipoFilter,
   hasData,
-  t,
+  tokens,
 }: {
   readFilter: string;
   tipoFilter: string;
   hasData: boolean;
-  t: Theme;
+  tokens: ThemeTokens;
 }) {
-  const isFiltered =
-    readFilter !== "todas" || tipoFilter !== "todos";
+  const isFiltered = readFilter !== "todas" || tipoFilter !== "todos";
 
   const icon = !hasData
     ? "ti-bell-off"
@@ -340,8 +453,8 @@ function EmptyState({
   return (
     <div
       style={{
-        background: t.surface,
-        border: `1px solid ${t.border}`,
+        background: tokens.surface,
+        border: `1px solid ${tokens.border}`,
         borderRadius: 14,
         padding: "4rem 2rem",
         textAlign: "center",
@@ -351,7 +464,7 @@ function EmptyState({
         className={`ti ${icon}`}
         style={{
           fontSize: 40,
-          color: t.textFaint,
+          color: tokens.textFaint,
           display: "block",
           marginBottom: 12,
         }}
@@ -361,14 +474,14 @@ function EmptyState({
           margin: 0,
           fontSize: 14,
           fontWeight: 600,
-          color: t.textMuted,
+          color: tokens.textMuted,
         }}
       >
         {title}
       </p>
       {subtitle && (
         <p
-          style={{ margin: "6px 0 0", fontSize: 12, color: t.textFaint }}
+          style={{ margin: "6px 0 0", fontSize: 12, color: tokens.textFaint }}
         >
           {subtitle}
         </p>
@@ -380,20 +493,26 @@ function EmptyState({
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function NotificationsPage() {
-  const t = T.dark;
+  const { isDark } = useThemeContext();
+  const tokens = getThemeTokens(isDark);
 
-  const [notifs,      setNotifs]      = useState<Notif[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [readFilter,  setReadFilter]  = useState<"todas" | "no_leidas" | "leidas">("todas");
-  const [tipoFilter,  setTipoFilter]  = useState("todos");
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<{
+    text: string;
+    type: "error" | "success";
+  } | null>(null);
+  const [readFilter, setReadFilter] = useState<
+    "todas" | "no_leidas" | "leidas"
+  >("todas");
+  const [tipoFilter, setTipoFilter] = useState("todos");
 
-  // ── Helpers de acción-error ────────────────────────────────────────────────
+  // ── Helpers de acción ────────────────────────────────────────────────
 
-  const showActionError = (msg: string) => {
-    setActionError(msg);
-    setTimeout(() => setActionError(null), 3500);
+  const showActionMessage = (text: string, type: "error" | "success" = "error") => {
+    setActionMessage({ text, type });
+    setTimeout(() => setActionMessage(null), 3500);
   };
 
   // ── Data fetching ──────────────────────────────────────────────────────────
@@ -405,12 +524,29 @@ export default function NotificationsPage() {
       const data = await notificationsService.getNotificaciones();
       setNotifs(data);
     } catch (err) {
-      const message =
-        err instanceof NotificationsError
-          ? err.message
-          : "Ocurrió un error inesperado.";
-      setError(message);
-      console.error("[NotificationsPage] fetchNotificaciones:", err);
+      // Manejo de errores usando la clase NotificationsError
+      const notificationsError = NotificationsError.fromUnknown(err);
+      
+      // Mensajes personalizados según el tipo de error
+      let userMessage: string;
+      
+      if (notificationsError.isUnauthorized()) {
+        userMessage = 'No tienes permisos para ver las notificaciones. Por favor, inicia sesión nuevamente.';
+      } else if (notificationsError.isNotFound()) {
+        userMessage = 'No se encontraron notificaciones en el sistema.';
+      } else if (notificationsError.isTimeout()) {
+        userMessage = 'La solicitud ha tardado demasiado. Por favor, verifica tu conexión e intenta nuevamente.';
+      } else {
+        // Usar el mensaje del error o uno genérico
+        userMessage = notificationsError.message || 'Ocurrió un error inesperado al cargar las notificaciones.';
+      }
+      
+      setError(userMessage);
+      console.error("[NotificationsPage] fetchNotificaciones:", {
+        originalError: err,
+        notificationsError,
+        userMessage,
+      });
     } finally {
       setLoading(false);
     }
@@ -423,62 +559,78 @@ export default function NotificationsPage() {
   // ── Acciones sincronizadas con backend ────────────────────────────────────
 
   const markRead = async (id: number) => {
-    // Optimistic update
+    const original = notifs.find((n) => n.id === id);
+    if (!original || original.leida) return;
+
     setNotifs((prev) =>
       prev.map((n) => (n.id === id ? { ...n, leida: true } : n))
     );
+
     try {
       await notificationsService.markAsRead(id);
+      showActionMessage("Notificación marcada como leída", "success");
     } catch (err) {
-      // Rollback
       setNotifs((prev) =>
         prev.map((n) => (n.id === id ? { ...n, leida: false } : n))
       );
-      showActionError(
-        err instanceof NotificationsError
-          ? err.message
-          : "No se pudo marcar como leída."
+      const notificationsError = NotificationsError.fromUnknown(err);
+      showActionMessage(
+        notificationsError.message || "No se pudo marcar como leída."
       );
     }
   };
 
   const markAllRead = async () => {
     const prev = notifs;
-    // Optimistic update
     setNotifs((ns) => ns.map((n) => ({ ...n, leida: true })));
+
     try {
       await notificationsService.markAllAsRead();
+      showActionMessage("Todas las notificaciones marcadas como leídas", "success");
     } catch (err) {
-      // Rollback
       setNotifs(prev);
-      showActionError(
-        err instanceof NotificationsError
-          ? err.message
-          : "No se pudieron marcar todas como leídas."
+      const notificationsError = NotificationsError.fromUnknown(err);
+      showActionMessage(
+        notificationsError.message || "No se pudieron marcar todas como leídas."
       );
     }
   };
 
   const deleteNotif = async (id: number) => {
     const removed = notifs.find((n) => n.id === id);
-    // Optimistic update
+    if (!removed) return;
+
     setNotifs((prev) => prev.filter((n) => n.id !== id));
+
     try {
       await notificationsService.deleteNotif(id);
+      showActionMessage("Notificación eliminada", "success");
     } catch (err) {
-      // Rollback
-      if (removed) {
-        setNotifs((prev) => {
-          const copy = [...prev];
-          const originalIndex = notifs.findIndex((n) => n.id === id);
-          copy.splice(originalIndex, 0, removed);
-          return copy;
-        });
-      }
-      showActionError(
-        err instanceof NotificationsError
-          ? err.message
-          : "No se pudo eliminar la notificación."
+      setNotifs((prev) => {
+        const copy = [...prev];
+        const originalIndex = notifs.findIndex((n) => n.id === id);
+        copy.splice(originalIndex, 0, removed);
+        return copy;
+      });
+      const notificationsError = NotificationsError.fromUnknown(err);
+      showActionMessage(
+        notificationsError.message || "No se pudo eliminar la notificación."
+      );
+    }
+  };
+
+  const deleteAllRead = async () => {
+    const prev = notifs;
+    setNotifs((prev) => prev.filter((n) => !n.leida));
+
+    try {
+      await notificationsService.deleteAllRead();
+      showActionMessage("Notificaciones leídas eliminadas", "success");
+    } catch (err) {
+      setNotifs(prev);
+      const notificationsError = NotificationsError.fromUnknown(err);
+      showActionMessage(
+        notificationsError.message || "No se pudieron eliminar las notificaciones."
       );
     }
   };
@@ -509,7 +661,7 @@ export default function NotificationsPage() {
           href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
-        <LoadingSkeleton t={t} />
+        <LoadingSkeleton tokens={tokens} />
       </>
     );
   }
@@ -528,7 +680,7 @@ export default function NotificationsPage() {
       <div
         style={{
           fontFamily: "'DM Sans', sans-serif",
-          color: t.text,
+          color: tokens.text,
           fontSize: 14,
         }}
       >
@@ -549,7 +701,7 @@ export default function NotificationsPage() {
                 margin: 0,
                 fontSize: 22,
                 fontWeight: 700,
-                color: t.text,
+                color: tokens.text,
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
@@ -560,7 +712,7 @@ export default function NotificationsPage() {
               {stats.sinLeer > 0 && (
                 <span
                   style={{
-                    background: t.danger,
+                    background: tokens.danger,
                     color: "#fff",
                     fontSize: 11,
                     fontWeight: 700,
@@ -573,7 +725,7 @@ export default function NotificationsPage() {
               )}
             </h1>
             <p
-              style={{ margin: "4px 0 0", fontSize: 13, color: t.textMuted }}
+              style={{ margin: "4px 0 0", fontSize: 13, color: tokens.textMuted }}
             >
               Centro de notificaciones del sistema
             </p>
@@ -587,9 +739,9 @@ export default function NotificationsPage() {
                 gap: 6,
                 padding: "8px 14px",
                 borderRadius: 10,
-                border: `1.5px solid ${t.border}`,
+                border: `1.5px solid ${tokens.border}`,
                 background: "transparent",
-                color: t.textMuted,
+                color: tokens.textMuted,
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: "pointer",
@@ -597,15 +749,44 @@ export default function NotificationsPage() {
                 transition: "all 0.15s",
               }}
               onMouseEnter={(e) =>
-                (e.currentTarget.style.borderColor = t.accent + "66")
+                (e.currentTarget.style.borderColor = tokens.accent + "66")
               }
               onMouseLeave={(e) =>
-                (e.currentTarget.style.borderColor = t.border)
+                (e.currentTarget.style.borderColor = tokens.border)
               }
             >
               <i className="ti ti-refresh" style={{ fontSize: 15 }} />
               Actualizar
             </button>
+            {stats.leidas > 0 && (
+              <button
+                onClick={deleteAllRead}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "8px 16px",
+                  borderRadius: 10,
+                  border: `1.5px solid ${tokens.border}`,
+                  background: "transparent",
+                  color: tokens.textMuted,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.borderColor = tokens.danger + "66")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.borderColor = tokens.border)
+                }
+              >
+                <i className="ti ti-trash" style={{ fontSize: 15 }} />
+                Limpiar leídas
+              </button>
+            )}
             <button
               onClick={markAllRead}
               disabled={stats.sinLeer === 0}
@@ -616,10 +797,10 @@ export default function NotificationsPage() {
                 padding: "8px 16px",
                 borderRadius: 10,
                 border: `1.5px solid ${
-                  stats.sinLeer > 0 ? t.accent + "66" : t.border
+                  stats.sinLeer > 0 ? tokens.accent + "66" : tokens.border
                 }`,
                 background: "transparent",
-                color: stats.sinLeer > 0 ? t.accent : t.textFaint,
+                color: stats.sinLeer > 0 ? tokens.accent : tokens.textFaint,
                 fontSize: 13,
                 fontWeight: 600,
                 cursor: stats.sinLeer > 0 ? "pointer" : "not-allowed",
@@ -635,18 +816,14 @@ export default function NotificationsPage() {
 
         {/* Error banner de carga */}
         {error && (
-          <ErrorBanner
-            message={error}
-            onRetry={fetchNotificaciones}
-            t={t}
-          />
+          <ErrorBanner message={error} onRetry={fetchNotificaciones} tokens={tokens} />
         )}
 
-        {/* Stats — siempre visibles */}
+        {/* Stats cards mejoradas */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
             gap: 12,
             marginBottom: 24,
           }}
@@ -656,43 +833,55 @@ export default function NotificationsPage() {
               label: "Total",
               value: stats.total,
               icon: "ti-bell",
-              color: "#3b82f6",
+              color: tokens.info,
             },
             {
               label: "Sin leer",
               value: stats.sinLeer,
               icon: "ti-bell-ringing",
-              color: t.danger,
+              color: tokens.danger,
+            },
+            {
+              label: "Leídas",
+              value: stats.leidas,
+              icon: "ti-bell-check",
+              color: tokens.accent,
             },
             {
               label: "Advertencias",
               value: stats.advertencias,
               icon: "ti-alert-triangle",
-              color: "#f59e0b",
+              color: tokens.warning,
             },
             {
               label: "Errores",
               value: stats.errores,
               icon: "ti-circle-x",
-              color: t.danger,
+              color: tokens.danger,
+            },
+            {
+              label: "Éxitos",
+              value: stats.exitos,
+              icon: "ti-circle-check",
+              color: tokens.accent,
             },
           ].map((s) => (
             <div
               key={s.label}
               style={{
-                background: t.surface,
-                border: `1px solid ${t.border}`,
+                background: tokens.surface,
+                border: `1px solid ${tokens.border}`,
                 borderRadius: 12,
-                padding: "14px 16px",
+                padding: "12px 14px",
                 display: "flex",
                 alignItems: "center",
-                gap: 12,
+                gap: 10,
               }}
             >
               <div
                 style={{
-                  width: 38,
-                  height: 38,
+                  width: 34,
+                  height: 34,
                   borderRadius: 10,
                   background: s.color + "18",
                   display: "flex",
@@ -703,24 +892,24 @@ export default function NotificationsPage() {
               >
                 <i
                   className={`ti ${s.icon}`}
-                  style={{ fontSize: 18, color: s.color }}
+                  style={{ fontSize: 16, color: s.color }}
                 />
               </div>
               <div>
                 <div
                   style={{
-                    fontSize: 22,
+                    fontSize: 18,
                     fontWeight: 700,
-                    color: t.text,
-                    lineHeight: 1,
+                    color: tokens.text,
+                    lineHeight: 1.2,
                   }}
                 >
                   {s.value}
                 </div>
                 <div
                   style={{
-                    fontSize: 11,
-                    color: t.textMuted,
+                    fontSize: 10,
+                    color: tokens.textMuted,
                     marginTop: 2,
                   }}
                 >
@@ -744,30 +933,33 @@ export default function NotificationsPage() {
           <FilterPill
             active={readFilter === "todas"}
             label="Todas"
+            count={stats.total}
             onClick={() => setReadFilter("todas")}
-            color={t.accent}
-            t={t}
+            color={tokens.accent}
+            tokens={tokens}
           />
           <FilterPill
             active={readFilter === "no_leidas"}
-            label={`Sin leer${stats.sinLeer > 0 ? ` (${stats.sinLeer})` : ""}`}
+            label="Sin leer"
+            count={stats.sinLeer}
             onClick={() => setReadFilter("no_leidas")}
-            color={t.danger}
-            t={t}
+            color={tokens.danger}
+            tokens={tokens}
           />
           <FilterPill
             active={readFilter === "leidas"}
             label="Leídas"
+            count={stats.leidas}
             onClick={() => setReadFilter("leidas")}
-            color={t.accent}
-            t={t}
+            color={tokens.accent}
+            tokens={tokens}
           />
 
           <div
             style={{
               width: 1,
               height: 20,
-              background: t.border,
+              background: tokens.border,
               margin: "0 4px",
             }}
           />
@@ -776,43 +968,50 @@ export default function NotificationsPage() {
             active={tipoFilter === "todos"}
             label="Todos los tipos"
             onClick={() => setTipoFilter("todos")}
-            color={t.accent}
-            t={t}
+            color={tokens.accent}
+            tokens={tokens}
           />
-          {(
-            ["success", "info", "warning", "error"] as NotifTipo[]
-          ).map((tipo) => {
-            const cfg = TIPO_CONFIG[tipo];
-            return (
-              <FilterPill
-                key={tipo}
-                active={tipoFilter === tipo}
-                label={cfg.label}
-                onClick={() => setTipoFilter(tipo)}
-                color={cfg.c}
-                t={t}
-              />
-            );
-          })}
+          {(["success", "info", "warning", "error"] as NotifTipo[]).map(
+            (tipo) => {
+              const cfg = TIPO_CONFIG[tipo];
+              const count =
+                tipo === "success"
+                  ? stats.exitos
+                  : tipo === "info"
+                  ? stats.informacion
+                  : tipo === "warning"
+                  ? stats.advertencias
+                  : stats.errores;
+              return (
+                <FilterPill
+                  key={tipo}
+                  active={tipoFilter === tipo}
+                  label={cfg.label}
+                  count={count}
+                  onClick={() => setTipoFilter(tipo)}
+                  color={cfg.c}
+                  tokens={tokens}
+                />
+              );
+            }
+          )}
         </div>
 
-        {/* Lista */}
-        <div
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
+        {/* Lista de notificaciones */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {notifs.length === 0 && !error ? (
             <EmptyState
               readFilter={readFilter}
               tipoFilter={tipoFilter}
               hasData={false}
-              t={t}
+              tokens={tokens}
             />
           ) : filtered.length === 0 ? (
             <EmptyState
               readFilter={readFilter}
               tipoFilter={tipoFilter}
               hasData={true}
-              t={t}
+              tokens={tokens}
             />
           ) : (
             filtered.map((n) => {
@@ -821,24 +1020,52 @@ export default function NotificationsPage() {
                 <div
                   key={n.id}
                   style={{
-                    background: t.surface,
+                    background: tokens.surface,
                     border: `1.5px solid ${
-                      n.leida ? t.border : cfg.c + "40"
+                      n.leida ? tokens.border : cfg.c + "50"
                     }`,
                     borderRadius: 12,
                     padding: "14px 16px",
                     display: "flex",
                     gap: 14,
                     alignItems: "flex-start",
-                    transition: "all 0.15s",
-                    opacity: n.leida ? 0.78 : 1,
+                    transition: "all 0.2s",
+                    opacity: n.leida ? 0.75 : 1,
+                    position: "relative",
+                    overflow: "hidden",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!n.leida) {
+                      e.currentTarget.style.borderColor = cfg.c;
+                      e.currentTarget.style.transform = "translateX(2px)";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = n.leida
+                      ? tokens.border
+                      : cfg.c + "50";
+                    e.currentTarget.style.transform = "translateX(0)";
                   }}
                 >
+                  {/* Indicador visual de no leída */}
+                  {!n.leida && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 4,
+                        background: cfg.c,
+                      }}
+                    />
+                  )}
+
                   {/* Ícono de tipo */}
                   <div
                     style={{
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       borderRadius: 10,
                       background: cfg.bg,
                       display: "flex",
@@ -850,7 +1077,7 @@ export default function NotificationsPage() {
                   >
                     <i
                       className={`ti ${cfg.icon}`}
-                      style={{ fontSize: 18, color: cfg.c }}
+                      style={{ fontSize: 20, color: cfg.c }}
                     />
                   </div>
 
@@ -862,13 +1089,14 @@ export default function NotificationsPage() {
                         alignItems: "center",
                         gap: 8,
                         marginBottom: 4,
+                        flexWrap: "wrap",
                       }}
                     >
                       <span
                         style={{
                           fontSize: 14,
-                          fontWeight: n.leida ? 500 : 700,
-                          color: t.text,
+                          fontWeight: n.leida ? 600 : 700,
+                          color: tokens.text,
                         }}
                       >
                         {n.titulo}
@@ -876,30 +1104,38 @@ export default function NotificationsPage() {
                       {!n.leida && (
                         <span
                           style={{
-                            width: 7,
-                            height: 7,
-                            borderRadius: "50%",
-                            background: cfg.c,
-                            flexShrink: 0,
+                            background: cfg.c + "20",
+                            color: cfg.c,
+                            fontSize: 10,
+                            fontWeight: 600,
+                            padding: "2px 8px",
+                            borderRadius: 99,
                           }}
-                        />
+                        >
+                          Nueva
+                        </span>
                       )}
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: tokens.textFaint,
+                          marginLeft: "auto",
+                        }}
+                        title={formatDate(n.fecha_creacion)}
+                      >
+                        {timeAgo(n.fecha_creacion)}
+                      </span>
                     </div>
                     <p
                       style={{
-                        margin: "0 0 6px",
+                        margin: "0 0 8px",
                         fontSize: 13,
-                        color: t.textMuted,
+                        color: tokens.textMuted,
                         lineHeight: 1.5,
                       }}
                     >
                       {n.mensaje}
                     </p>
-                    <span
-                      style={{ fontSize: 11, color: t.textFaint }}
-                    >
-                      {timeAgo(n.fecha_creacion)}
-                    </span>
                   </div>
 
                   {/* Acciones */}
@@ -916,17 +1152,25 @@ export default function NotificationsPage() {
                         onClick={() => markRead(n.id)}
                         title="Marcar como leída"
                         style={{
-                          background: "none",
-                          border: `1px solid ${t.border}`,
+                          background: tokens.accentBg,
+                          border: "none",
                           cursor: "pointer",
-                          color: t.accent,
-                          padding: "5px 10px",
+                          color: tokens.accent,
+                          padding: "6px 12px",
                           borderRadius: 8,
                           fontSize: 12,
                           fontWeight: 600,
                           fontFamily: "inherit",
+                          transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.opacity = "0.8")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.opacity = "1")
+                        }
                       >
+                        <i className="ti ti-check" style={{ marginRight: 4 }} />
                         Leída
                       </button>
                     )}
@@ -934,18 +1178,26 @@ export default function NotificationsPage() {
                       <button
                         title="Ver detalle"
                         style={{
-                          background: t.accentBg,
-                          border: "none",
+                          background: tokens.surface2,
+                          border: `1px solid ${tokens.border}`,
                           cursor: "pointer",
-                          color: t.accent,
-                          padding: "5px 10px",
+                          color: tokens.textMuted,
+                          padding: "6px 12px",
                           borderRadius: 8,
                           fontSize: 12,
                           fontWeight: 600,
                           fontFamily: "inherit",
+                          transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.borderColor = tokens.accent)
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.borderColor = tokens.border)
+                        }
                       >
-                        Ver →
+                        <i className="ti ti-eye" style={{ marginRight: 4 }} />
+                        Ver
                       </button>
                     )}
                     <button
@@ -953,17 +1205,26 @@ export default function NotificationsPage() {
                       title="Eliminar"
                       style={{
                         background: "none",
-                        border: `1px solid ${t.border}`,
+                        border: `1px solid ${tokens.border}`,
                         cursor: "pointer",
-                        color: t.textFaint,
-                        padding: "5px 8px",
+                        color: tokens.textFaint,
+                        padding: "6px 10px",
                         borderRadius: 8,
                         fontSize: 14,
                         fontFamily: "inherit",
                         lineHeight: 1,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = tokens.danger;
+                        e.currentTarget.style.color = tokens.danger;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = tokens.border;
+                        e.currentTarget.style.color = tokens.textFaint;
                       }}
                     >
-                      <i className="ti ti-x" />
+                      <i className="ti ti-trash" />
                     </button>
                   </div>
                 </div>
@@ -971,10 +1232,30 @@ export default function NotificationsPage() {
             })
           )}
         </div>
+
+        {/* Pie de página informativo */}
+        {notifs.length > 0 && (
+          <div
+            style={{
+              marginTop: 20,
+              padding: "10px 16px",
+              background: tokens.surface2,
+              borderRadius: 10,
+              textAlign: "center",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 11, color: tokens.textFaint }}>
+              <i className="ti ti-info-circle" style={{ fontSize: 12, marginRight: 6, verticalAlign: "middle" }} />
+              Las notificaciones importantes del sistema aparecerán aquí. Puedes marcarlas como leídas o eliminarlas.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Toast de error para acciones */}
-      {actionError && <ActionToast message={actionError} t={t} />}
+      {/* Toast de mensajes */}
+      {actionMessage && (
+        <ActionToast message={actionMessage.text} type={actionMessage.type} tokens={tokens} />
+      )}
     </>
   );
 }

@@ -1,6 +1,6 @@
-// services/notifications.service.ts
+// 📁 services/notifications.service.ts
 
-import { apiFetch } from "@/services/api";
+import { apiService } from "@/services/api.service";
 
 // ─────────────────────────────────────────────
 // TIPOS
@@ -10,6 +10,7 @@ export type NotifTipo = "warning" | "info" | "success" | "error";
 
 export interface Notif {
   id: number;
+  usuario_id: string;
   tipo: NotifTipo;
   titulo: string;
   mensaje: string;
@@ -32,8 +33,11 @@ export interface NotifActionResponse {
 export interface NotifStats {
   total: number;
   sinLeer: number;
+  leidas: number;
   advertencias: number;
   errores: number;
+  exitos: number;
+  informacion: number;
 }
 
 // ─────────────────────────────────────────────
@@ -55,106 +59,25 @@ export const TIPO_CONFIG: Record<
     icon: "ti-alert-triangle",
     label: "Advertencia",
   },
-
   info: {
     bg: "rgba(59,130,246,0.1)",
     c: "#60a5fa",
     icon: "ti-info-circle",
     label: "Información",
   },
-
   success: {
     bg: "rgba(0,201,107,0.1)",
     c: "#00c96b",
     icon: "ti-circle-check",
     label: "Éxito",
   },
-
   error: {
     bg: "rgba(239,68,68,0.1)",
-    c: "#f87171",
+    c: "#239,68,68",
     icon: "ti-circle-x",
     label: "Error",
   },
 };
-
-// ─────────────────────────────────────────────
-// ERRORES TIPADOS
-// ─────────────────────────────────────────────
-
-export class NotificationsError extends Error {
-  constructor(
-    message: string,
-    public readonly code:
-      | "UNAUTHORIZED"
-      | "FORBIDDEN"
-      | "SERVER_ERROR"
-      | "NETWORK_ERROR"
-      | "UNKNOWN"
-  ) {
-    super(message);
-    this.name = "NotificationsError";
-  }
-}
-
-// ─────────────────────────────────────────────
-// HELPERS INTERNOS
-// ─────────────────────────────────────────────
-
-async function handleResponse<T>(res: Response): Promise<T> {
-  if (res.status === 401) {
-    throw new NotificationsError(
-      "Sesión expirada o sin permisos. Vuelve a iniciar sesión.",
-      "UNAUTHORIZED"
-    );
-  }
-
-  if (res.status === 403) {
-    throw new NotificationsError(
-      "No tienes permisos para realizar esta acción.",
-      "FORBIDDEN"
-    );
-  }
-
-  if (!res.ok) {
-    throw new NotificationsError(
-      `Error del servidor (${res.status}). Intenta más tarde.`,
-      "SERVER_ERROR"
-    );
-  }
-
-  const data = await res.json();
-
-  if (!data.success) {
-    throw new NotificationsError(
-      data.message ?? "La respuesta del servidor no fue exitosa.",
-      "SERVER_ERROR"
-    );
-  }
-
-  return data as T;
-}
-
-async function safeFetch(
-  endpoint: string,
-  options?: RequestInit
-): Promise<Response> {
-  try {
-    return await apiFetch(endpoint, options);
-  } catch (err) {
-    const isNetwork =
-      err instanceof TypeError &&
-      (err.message.includes("fetch") ||
-        err.message.includes("network"));
-
-    throw new NotificationsError(
-      isNetwork
-        ? "No se pudo conectar al servidor. Verifica que el backend esté corriendo."
-        : "Ocurrió un error inesperado.",
-      isNetwork ? "NETWORK_ERROR" : "UNKNOWN"
-    );
-  }
-}
 
 // ─────────────────────────────────────────────
 // SERVICIO
@@ -163,56 +86,65 @@ async function safeFetch(
 export const notificationsService = {
   /**
    * Obtiene todas las notificaciones del usuario autenticado.
+   * Delega el manejo de expiración de token y de red a apiService de forma transparente.
    */
   async getNotificaciones(): Promise<Notif[]> {
-    const res = await safeFetch("/notificaciones");
+    try {
+      // apiService.get ya maneja internamente el tipado, .json() y los errores HTTP comunes
+      const response = await apiService.get<NotifsResponse>("/notificaciones");
 
-    const data =
-      await handleResponse<NotifsResponse>(res);
-
-    return data.data ?? [];
+      return (response.data ?? []).map((notif) => ({
+        ...notif,
+        mensaje: notif.mensaje || "Sin contenido",
+        titulo: notif.titulo || "Notificación",
+      }));
+    } catch (error: any) {
+      throw new Error(error.message || "No se pudieron cargar las notificaciones.");
+    }
   },
 
   /**
    * Marca una notificación como leída en el backend.
    */
   async markAsRead(id: number): Promise<void> {
-    const res = await safeFetch(
-      `/notificaciones/${id}/leer`,
-      {
-        method: "PATCH",
-      }
-    );
-
-    await handleResponse<NotifActionResponse>(res);
+    try {
+      await apiService.patch<NotifActionResponse>(`/notificaciones/${id}/leer`);
+    } catch (error: any) {
+      throw new Error(error.message || `Error al marcar la notificación ${id} como leída.`);
+    }
   },
 
   /**
    * Marca todas las notificaciones como leídas.
    */
   async markAllAsRead(): Promise<void> {
-    const res = await safeFetch(
-      "/notificaciones/leer-todas",
-      {
-        method: "PATCH",
-      }
-    );
-
-    await handleResponse<NotifActionResponse>(res);
+    try {
+      await apiService.patch<NotifActionResponse>("/notificaciones/leer-todas");
+    } catch (error: any) {
+      throw new Error(error.message || "Error al marcar todas las notificaciones como leídas.");
+    }
   },
 
   /**
    * Elimina una notificación del backend.
    */
   async deleteNotif(id: number): Promise<void> {
-    const res = await safeFetch(
-      `/notificaciones/${id}`,
-      {
-        method: "DELETE",
-      }
-    );
+    try {
+      await apiService.delete<NotifActionResponse>(`/notificaciones/${id}`);
+    } catch (error: any) {
+      throw new Error(error.message || "Error al eliminar la notificación.");
+    }
+  },
 
-    await handleResponse<NotifActionResponse>(res);
+  /**
+   * Elimina todas las notificaciones leídas.
+   */
+  async deleteAllRead(): Promise<void> {
+    try {
+      await apiService.delete<NotifActionResponse>("/notificaciones/leidas");
+    } catch (error: any) {
+      throw new Error(error.message || "Error al eliminar las notificaciones leídas.");
+    }
   },
 
   // ─────────────────────────────────────────
@@ -222,29 +154,19 @@ export const notificationsService = {
   calcStats(notifs: Notif[]): NotifStats {
     return {
       total: notifs.length,
-
-      sinLeer: notifs.filter(
-        (n) => !n.leida
-      ).length,
-
-      advertencias: notifs.filter(
-        (n) => n.tipo === "warning"
-      ).length,
-
-      errores: notifs.filter(
-        (n) => n.tipo === "error"
-      ).length,
+      sinLeer: notifs.filter((n) => !n.leida).length,
+      leidas: notifs.filter((n) => n.leida).length,
+      advertencias: notifs.filter((n) => n.tipo === "warning").length,
+      errores: notifs.filter((n) => n.tipo === "error").length,
+      exitos: notifs.filter((n) => n.tipo === "success").length,
+      informacion: notifs.filter((n) => n.tipo === "info").length,
     };
   },
 
   filterNotifs(
     notifs: Notif[],
     opts: {
-      readFilter:
-        | "todas"
-        | "no_leidas"
-        | "leidas";
-
+      readFilter: "todas" | "no_leidas" | "leidas";
       tipoFilter: string;
     }
   ): Notif[] {
@@ -257,8 +179,7 @@ export const notificationsService = {
           : n.leida;
 
       const tipoMatch =
-        opts.tipoFilter === "todos" ||
-        n.tipo === opts.tipoFilter;
+        opts.tipoFilter === "todos" || n.tipo === opts.tipoFilter;
 
       return readMatch && tipoMatch;
     });

@@ -1,7 +1,0 @@
-Vue.js es un framework progresivo de JavaScript para construir interfaces de usuario.
-La base de Vue es la reactividad centralizada. Los componentes modernos en Vue utilizan la configuración especializada nativa '<script setup>' bajo los esquemas de la Composition API. Estos esquemas permiten declarar estados reactivos mutables utilizando las herramientas del núcleo 'ref()' o 'reactive()'.
-
-El control secuencial técnico de un componente Vue se despliega por medio de eventos del ciclo de vida. Entre los primordiales se encuentran 'onMounted', 'onUpdated' y 'onUnmounted'.
-
-El estándar para transferencia de información paramétrica desde un componente de grado superior (padre) hasta un bloque heredado (hijo), comprende el uso de propiedades estructurales comúnmente denominadas 'Props'. Como contraparte transaccional, para propiciar la emisión y escalado de eventos partiendo del hijo al bloque padre, se aplica el macro 'defineEmits'.
-A niveles estructurales amplios, el ecosistema recomienda administrar el alcance de datos globales apalancando la arquitectura del gestor de estado 'Pinia'.

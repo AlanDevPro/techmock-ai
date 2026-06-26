@@ -1,0 +1,64 @@
+# ============================================================
+# docker-compose.prod.yml — Editor de Código | PRODUCCIÓN
+# Build local en la EC2 — sin ECR.
+# El ALB enruta /editor/* hacia el puerto 3001.
+# ============================================================
+version: "3.9"
+
+services:
+  editor-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+        # 🔥 CRÍTICO: Pasamos la variable al build para que Axios no use localhost en el cliente
+        NEXT_PUBLIC_RAG_API_URL: ${NEXT_PUBLIC_RAG_API_URL}
+    image: techmock-editor:latest
+    container_name: techmock-editor
+
+    restart: unless-stopped
+
+    ports:
+      - "3001:3001"
+
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      HOSTNAME: "0.0.0.0"
+
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+      
+      # Mapeamos correctamente las variables de la API RAG a la ejecución del contenedor
+      NEXT_PUBLIC_RAG_API_URL: ${NEXT_PUBLIC_RAG_API_URL}
+      TECHMOCK_API_KEY: ${TECHMOCK_API_KEY}
+
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    networks:
+      - editor-prod-net
+
+networks:
+  editor-prod-net:
+    driver: bridge

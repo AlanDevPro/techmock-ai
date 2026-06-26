@@ -1,7 +1,13 @@
+// app/layout.tsx
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+
 import "./globals.css";
-import { Providers } from "./providers";
+import "@tabler/icons-webfont/dist/tabler-icons.min.css";
+
+import { AuthProvider } from "../contexts/AuthContext";
+import { ThemeProvider } from "../components/providers/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,7 +21,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "TechMock AI - Simulador de Entrevistas Técnicas",
-  description: "Simulador interactivo de entrevistas de programación impulsado por IA. Practica con preguntas adaptativas, obtén retroalimentación técnica inmediata y domina las entrevistas de tu próximo trabajo.",
+  description:
+    "Simulador interactivo de entrevistas de programación impulsado por IA. Practica con preguntas adaptativas, obtén retroalimentación técnica inmediata y domina las entrevistas de tu próximo trabajo.",
 };
 
 export default function RootLayout({
@@ -30,9 +37,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Providers>
-          {children}
-        </Providers>
+        <AuthProvider>
+          <ThemeProvider>
+            {children}
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

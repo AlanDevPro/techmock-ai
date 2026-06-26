@@ -6,7 +6,7 @@
 services:
 
   # ──────────────────────────────────────────────────────────
-  # Frontend Next.js 16
+  # Frontend Next.js
   # ──────────────────────────────────────────────────────────
   frontend:
     container_name: techmock_frontend

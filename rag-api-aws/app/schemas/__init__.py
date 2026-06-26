@@ -10,7 +10,7 @@ from app.schemas.preguntas import (
     SolicitudSesionAdaptativa,
 )
 from app.schemas.evaluaciones import (
-    SolicitudAnalisisCodigo,
+    SolicitudFinalizarCodigo,
     RespuestaAnalisisCodigo,
     CalificacionGeneral,
     ErrorDetectado,
@@ -34,7 +34,7 @@ __all__ = [
     "SesionIniciadaResponse",
     "SolicitudSesionAdaptativa",
     # evaluaciones
-    "SolicitudAnalisisCodigo",
+    "SolicitudFinalizarCodigo",
     "RespuestaAnalisisCodigo",
     "CalificacionGeneral",
     "ErrorDetectado",

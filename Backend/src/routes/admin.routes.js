@@ -7,6 +7,7 @@ import {
   getDashboard,
   contactarDeveloper,
   getContactos,
+  getEvaluacionesAnalytics,
 } from "../controllers/admin.controller.js";
 import {
   getPreguntas,
@@ -24,10 +25,6 @@ import { onlyAdmin } from "../middlewares/role.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { preguntaSchema, updatePreguntaSchema } from "../validators/pregunta.validator.js";
 import { contactoSchema } from "../validators/contacto.validator.js";
-
-import {
-  getEvaluacionesAnalytics
-} from "../controllers/admin.controller.js";
 
 const router = Router();
 
@@ -49,8 +46,8 @@ router.post("/reclutamiento", validate(contactoSchema), contactarDeveloper);
 router.get("/reclutamiento",  getContactos);
 
 // ── Preguntas ─────────────────────────────────────────────────────────────────
-router.get("/preguntas",      getPreguntas);
-router.post("/preguntas",     validate(preguntaSchema), crearPregunta);
+router.get("/preguntas",       getPreguntas);
+router.post("/preguntas",      validate(preguntaSchema), crearPregunta);
 router.patch("/preguntas/:id", validate(updatePreguntaSchema), actualizarPregunta);
 router.delete("/preguntas/:id", eliminarPregunta);
 
@@ -59,7 +56,7 @@ router.get("/rubricas",       getRubricas);
 router.post("/rubricas",      crearRubrica);
 router.patch("/rubricas/:id", actualizarRubrica);
 
-// ── Evaluaciones ──────────────────────────────────────────────────────────────────
+// ── Evaluaciones ───────────────────────────────────────────────────────────────
 router.get("/evaluaciones", getEvaluacionesAnalytics);
 
 export default router;

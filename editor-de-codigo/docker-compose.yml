@@ -1,0 +1,43 @@
+# ============================================================
+# docker-compose.yml — Editor de Código | LOCAL (test de prod)
+# Construye la imagen localmente sin ECR
+# ============================================================
+version: "3.9"
+
+services:
+  editor-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: http://localhost:3001
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000
+
+    container_name: techmock-editor-local
+    restart: unless-stopped
+
+    ports:
+      - "3001:3001"
+
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      HOSTNAME: "0.0.0.0"
+
+      NEXT_PUBLIC_APP_URL: http://localhost:3001
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: local-secret-cambia-en-prod-openssl-rand-base64-32
+
+      TECHMOCK_API_BASE_URL: http://localhost:8000
+      TECHMOCK_API_KEY: local-api-key
+
+    networks:
+      - editor-net
+
+networks:
+  editor-net:
+    driver: bridge

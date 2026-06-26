@@ -4,6 +4,7 @@ import { ActivityView } from "./ActivityBar";
 import ExplorerPanel from "./ExplorerPanel";
 import SearchPanel from "./SearchPanel";
 import QuestionPanel from "./QuestionPanel";
+import { getWebContainer, fileExists, readFileContent } from "@/lib/webcontainer";
 
 interface SidebarProps {
   activeView: ActivityView;
@@ -40,10 +41,39 @@ export default function Sidebar({
   onResizeStart,
   onResizeEnd,
 }: SidebarProps) {
-  // Función auxiliar para manejar la selección de archivos con log de depuración
-  const handleFileSelect = (file: string, line?: number) => {
+  // 🔥 MEJORADA: handleFileSelect con carga automática desde WebContainer
+  const handleFileSelect = async (file: string, line?: number) => {
     console.log("📁 Sidebar - archivo seleccionado:", file);
-    console.log("📁 Sidebar - línea (si existe):", line);
+    
+    // Si el archivo no existe en fileSystem, intentar cargarlo desde WebContainer
+    if (!files[file]) {
+      console.warn(`⚠️ Archivo no encontrado en fileSystem: ${file}`);
+      
+      try {
+        const container = getWebContainer();
+        if (container) {
+          // Verificar si el archivo existe en WebContainer
+          const exists = await fileExists(file);
+          
+          if (exists) {
+            // Cargar el contenido desde WebContainer
+            const content = await readFileContent(file);
+            // Actualizar fileSystem con el contenido
+            onFsUpdate(prev => ({ ...prev, [file]: content }));
+            console.log(`✅ Archivo cargado desde WebContainer: ${file}`);
+          } else {
+            // Crear el archivo en WebContainer
+            await container.fs.writeFile(file.startsWith('/') ? file.substring(1) : file, '');
+            onFsUpdate(prev => ({ ...prev, [file]: '' }));
+            console.log(`✅ Archivo creado en WebContainer: ${file}`);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Error al cargar archivo ${file}:`, error);
+      }
+    }
+    
+    // Abrir el archivo
     onSelectFile(file, line);
   };
 

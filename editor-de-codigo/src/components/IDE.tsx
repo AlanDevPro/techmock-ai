@@ -1,16 +1,23 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import ActivityBar, { ActivityView } from "./ActivityBar";
-import LeftPanel from "./LeftPanel";
 import Sidebar from "./Sidebar";
 import EditorArea from "./EditorArea";
 import PreviewArea from "./PreviewArea";
-import TerminalArea from "./TerminalArea";
+import TerminalArea, { TerminalAreaRef } from "./TerminalArea";
 import StatusBar from "./StatusBar";
 import TopMenuBar from "./TopMenuBar";
-import { bootWebContainer, getFileSystem, readWebContainerFiles } from "@/lib/webcontainer";
+import { 
+  bootWebContainer, 
+  getFileSystem, 
+  readWebContainerFiles, 
+  updateFile,
+  getWebContainer,
+  readFileContent,
+  fileExists
+} from "@/lib/webcontainer";
 import codeService from "@/services/codeService";
 import { env } from "@/config/env";
 
@@ -20,8 +27,6 @@ export const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => voi
   toggleTheme: () => {},
 });
 export const useTheme = () => useContext(ThemeContext);
-
-// ─── URL helpers (solo cliente) ───────────────────────────────────────────────
 
 function getParam(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -47,10 +52,7 @@ function getInitialUsuarioId(): string | null {
   return getParam("usuario_id");
 }
 
-// ─── Componente principal ──────────────────────────────────────────────────────
-
 export default function IDE() {
-  
   const router = useRouter();
   const [theme, setTheme] = useState<Theme>("dark");
 
@@ -69,54 +71,58 @@ export default function IDE() {
   const [activeView, setActiveView] = useState<ActivityView>("explorer");
   const [submitStatus, setSubmitStatus] = useState<null | "running" | "success" | "error">(null);
   const [submitMessage, setSubmitMessage] = useState<string>("");
+  
+  // 🔥 REFERENCIA PARA EVITAR BUCLE INFINITO
+  const loadingFilesRef = useRef<Set<string>>(new Set());
+  
+  // CONTROL DE VISIBILIDAD DE PREVISUALIZACIÓN PERSISTENTE
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(400);
   const [isResizingPreview, setIsResizingPreview] = useState(false);
 
-  // ✅ AHORA EL SIDEBAR SIEMPRE ES VISIBLE
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
 
-  // ✅ AHORA LA TERMINAL SIEMPRE ES VISIBLE
+  // CONTROL DE VISIBILIDAD DE LA TERMINAL PERSISTENTE
   const [isTerminalVisible, setIsTerminalVisible] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(256);
   const [isResizingTerminal, setIsResizingTerminal] = useState(false);
-  const terminalAreaRef = useRef<{ fitTerminal?: () => void }>(null);
+  
+  const terminalAreaRef = useRef<TerminalAreaRef>(null);
 
   const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
 
-  console.log("🧠 [IDE INIT] Query params detectados:");
-  console.log("framework:", selectedFramework);
-  console.log("sesionId:", sesionId);
-  console.log("usuarioId:", usuarioId);
-
-  const sidebarRef = useRef<HTMLDivElement>(null);
-
-  // Diagnósticos derivados
   const diagnostics = useMemo(() => {
     const content = fileSystem[activeFile];
     if (!content) return { errors: 0, warnings: 0, infos: 0 };
-
     let errors = 0, warnings = 0, infos = 0;
-
-    errors   += (content.match(/error/i)           ?? []).length;
-    warnings += (content.match(/warning/i)         ?? []).length;
+    errors   += (content.match(/error/i)            ?? []).length;
+    warnings += (content.match(/warning/i)          ?? []).length;
     infos    += (content.match(/TODO|FIXME|HACK/i) ?? []).length;
-
     if (content.includes("undefined"))      errors++;
     if (content.includes("null reference")) errors++;
     if (content.includes("console.log"))    infos++;
-    if (content.includes("var "))           warnings++;
+    if (content.includes("var "))            warnings++;
     if (content.match(/==/g) && !content.match(/===/g)) warnings++;
-
     return { errors, warnings, infos };
   }, [activeFile, fileSystem]);
 
   const toggleTheme              = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
   const togglePreviewVisibility  = () => setIsPreviewVisible((v) => !v);
   const toggleSidebarVisibility  = () => setIsSidebarVisible((v) => !v);
-  const toggleTerminalVisibility = () => setIsTerminalVisible((v) => !v);
+  
+  const toggleTerminalVisibility = () => {
+    setIsTerminalVisible((v) => {
+      const nextState = !v;
+      if (nextState) {
+        setTimeout(() => {
+          terminalAreaRef.current?.fitTerminal();
+        }, 80);
+      }
+      return nextState;
+    });
+  };
 
   const handleViewChange = (view: ActivityView) => {
     setActiveView(view);
@@ -126,6 +132,155 @@ export default function IDE() {
   const handleCursorChange = (line: number, column: number) => {
     setCursorPosition({ line, column });
   };
+
+  // 🔥 FUNCIÓN: Manejar actualizaciones del fileSystem desde Sidebar/ExplorerPanel
+  const handleFsUpdate = (
+    updater: (prev: { [key: string]: string }) => { [key: string]: string }
+  ) => {
+    setFileSystem((prev) => {
+      const newState = updater(prev);
+      console.log('📁 [IDE] handleFsUpdate - Archivos:', Object.keys(newState).length);
+      console.log('📁 [IDE] handleFsUpdate - Nuevo archivo agregado?', 
+        Object.keys(newState).length > Object.keys(prev).length ? 'SÍ' : 'NO'
+      );
+      return newState;
+    });
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Manejar cambios de contenido desde EditorArea
+  const handleContentChange = (file: string, content: string) => {
+    console.log(`✏️ [IDE] handleContentChange - ${file}: ${content.length} caracteres`);
+    // Actualizar el fileSystem en tiempo real
+    setFileSystem(prev => ({ ...prev, [file]: content }));
+    // También actualizar en WebContainer
+    updateFile(file, content).catch(console.error);
+  };
+
+  // 🔥 MEJORADA: handleSelectFileWithLine con carga automática desde WebContainer
+  const handleSelectFileWithLine = async (file: string, line?: number) => {
+    console.log(`📁 [IDE] Seleccionando archivo: ${file}`);
+    
+    // 🔥 VERIFICAR SI EL ARCHIVO YA ESTÁ SIENDO CARGADO (EVITAR BUCLE)
+    if (loadingFilesRef.current.has(file)) {
+      console.log(`⏳ [IDE] Archivo ya está siendo cargado: ${file}`);
+      setActiveFile(file);
+      return;
+    }
+    
+    // Verificar si el archivo existe en el fileSystem local
+    if (!fileSystem[file]) {
+      console.warn(`⚠️ [IDE] Archivo no encontrado en fileSystem: ${file}`);
+      
+      // Marcar que estamos cargando este archivo
+      loadingFilesRef.current.add(file);
+      
+      try {
+        const container = getWebContainer();
+        if (container) {
+          // Verificar si el archivo existe en WebContainer
+          const exists = await fileExists(file);
+          
+          if (exists) {
+            // Cargar el contenido desde WebContainer
+            const content = await readFileContent(file);
+            console.log(`📄 [IDE] Contenido cargado: ${content.length} caracteres`);
+            setFileSystem(prev => ({ ...prev, [file]: content }));
+            console.log(`✅ [IDE] Archivo cargado desde WebContainer: ${file}`);
+          } else {
+            // Crear el archivo en WebContainer
+            console.log(`🆕 [IDE] Creando archivo en WebContainer: ${file}`);
+            await container.fs.writeFile(file.startsWith('/') ? file.substring(1) : file, '');
+            setFileSystem(prev => ({ ...prev, [file]: '' }));
+            console.log(`✅ [IDE] Archivo creado en WebContainer: ${file}`);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ [IDE] Error al cargar archivo ${file}:`, error);
+      } finally {
+        // Remover la marca de carga
+        loadingFilesRef.current.delete(file);
+      }
+    }
+    
+    // Activar el archivo
+    setActiveFile(file);
+    
+    // Si hay una línea específica, desplazarse a ella
+    if (line !== undefined && line > 0) {
+      console.log(`📍 [IDE] Navegando a línea ${line} en ${file}`);
+    }
+  };
+
+  // 🔥 CORREGIDO: Efecto para sincronizar archivos activos (SIN BUCLE INFINITO)
+  useEffect(() => {
+    if (!activeFile || isBooting) return;
+    
+    // 🔥 VERIFICAR SI EL ARCHIVO YA ESTÁ EN fileSystem
+    if (fileSystem[activeFile] !== undefined) {
+      // El archivo existe, no hacer nada
+      return;
+    }
+    
+    // 🔥 VERIFICAR SI YA ESTAMOS CARGANDO ESTE ARCHIVO
+    if (loadingFilesRef.current.has(activeFile)) {
+      console.log(`⏳ [IDE] Ya cargando: ${activeFile}`);
+      return;
+    }
+    
+    console.warn(`⚠️ [IDE] Archivo activo no encontrado en fileSystem: ${activeFile}`);
+    
+    // Marcar que estamos cargando
+    loadingFilesRef.current.add(activeFile);
+    
+    // Intentar cargar el archivo desde WebContainer
+    const loadMissingFile = async () => {
+      try {
+        const container = getWebContainer();
+        if (!container) {
+          console.warn('⚠️ [IDE] WebContainer no disponible');
+          loadingFilesRef.current.delete(activeFile);
+          return;
+        }
+        
+        // Verificar si existe en WebContainer
+        const exists = await fileExists(activeFile);
+        
+        if (exists) {
+          // Cargar el contenido
+          const content = await readFileContent(activeFile);
+          console.log(`📄 [IDE] Contenido cargado: ${content.length} caracteres`);
+          
+          // Actualizar fileSystem
+          setFileSystem(prev => {
+            if (prev[activeFile] !== undefined) return prev;
+            return { ...prev, [activeFile]: content };
+          });
+          
+          console.log(`✅ [IDE] Archivo activo cargado desde WebContainer: ${activeFile}`);
+        } else {
+          // Crear el archivo si no existe
+          console.log(`🆕 [IDE] Creando archivo activo: ${activeFile}`);
+          const normalizedPath = activeFile.startsWith('/') ? activeFile.substring(1) : activeFile;
+          await container.fs.writeFile(normalizedPath, '');
+          
+          // Actualizar fileSystem
+          setFileSystem(prev => {
+            if (prev[activeFile] !== undefined) return prev;
+            return { ...prev, [activeFile]: '' };
+          });
+          
+          console.log(`✅ [IDE] Archivo activo creado en WebContainer: ${activeFile}`);
+        }
+      } catch (error) {
+        console.error(`❌ [IDE] Error en sincronización:`, error);
+      } finally {
+        // Remover la marca de carga
+        loadingFilesRef.current.delete(activeFile);
+      }
+    };
+    
+    loadMissingFile();
+  }, [activeFile, fileSystem, isBooting]);
 
   const cssVars: Record<string, string> =
     theme === "dark"
@@ -168,27 +323,19 @@ export default function IDE() {
           "--btn-submit-hover": "#1e8e31",
         };
 
-  // Boot WebContainer
   useEffect(() => {
     let mounted = true;
-
-    console.log("🚀 [WEBCONTAINER] Iniciando boot...");
-
     bootWebContainer()
       .then(() => {
-        console.log("✅ [WEBCONTAINER] Boot exitoso");
         const fs = getFileSystem();
-        console.log("📁 [WEBCONTAINER] FileSystem:", fs);
         if (mounted) {
           setIsBooting(false);
           setFileSystem(fs);
-          console.log("✅ [WEBCONTAINER] Estado actualizado");
         }
       })
       .catch((err) => {
         console.error("❌ [WEBCONTAINER] Error fatal:", err);
       });
-
     return () => {
       mounted = false;
     };
@@ -196,20 +343,22 @@ export default function IDE() {
 
   useEffect(() => {
     if (isBooting) return;
-    const timer = setTimeout(() => setIsBootingUi(false), 5000);
+    const timer = setTimeout(() => setIsBootingUi(false), 2000);
     return () => clearTimeout(timer);
   }, [isBooting]);
 
-  
-
-  // Redimensionamiento del preview
+  // REDIMENSIONAMIENTO DEL PREVIEW (CON LOGICA ANTI-IFRAME)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingPreview) return;
-      const clampedWidth = Math.min(Math.max(window.innerWidth - e.clientX, 200), window.innerWidth * 0.7);
+      // Calculamos la distancia desde el borde derecho de la pantalla
+      const clampedWidth = Math.min(Math.max(window.innerWidth - e.clientX, 150), window.innerWidth * 0.85);
       setPreviewWidth(clampedWidth);
     };
-    const handleMouseUp = () => setIsResizingPreview(false);
+
+    const handleMouseUp = () => {
+      setIsResizingPreview(false);
+    };
 
     if (isResizingPreview) {
       document.addEventListener("mousemove", handleMouseMove);
@@ -217,6 +366,7 @@ export default function IDE() {
       document.body.style.cursor = "ew-resize";
       document.body.style.userSelect = "none";
     }
+
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
@@ -229,12 +379,12 @@ export default function IDE() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingSidebar) return;
-      if (e.clientX < 10) {
+      if (e.clientX < 50) {
         setIsSidebarVisible(false);
         setIsResizingSidebar(false);
         return;
       }
-      setSidebarWidth(Math.min(e.clientX, 500));
+      setSidebarWidth(Math.min(Math.max(e.clientX, 150), 500));
     };
     const handleMouseUp = () => setIsResizingSidebar(false);
 
@@ -264,7 +414,7 @@ export default function IDE() {
       }
       const clampedHeight = Math.min(Math.max(newHeight, 50), window.innerHeight * 0.7);
       setTerminalHeight(clampedHeight);
-      setTimeout(() => terminalAreaRef.current?.fitTerminal?.(), 50);
+      terminalAreaRef.current?.fitTerminal();
     };
     const handleMouseUp = () => setIsResizingTerminal(false);
 
@@ -290,31 +440,11 @@ export default function IDE() {
     setIsRefreshing(false);
   };
 
-  const handleSelectFileWithLine = (file: string, line?: number) => {
-    setActiveFile(file);
-    if (line) console.log(`Navegar a línea ${line} en el archivo ${file}`);
-  };
-
-  const handleSelectFile = (file: string) => {
-    handleSelectFileWithLine(file);
-  };
-
-  // ─── Submit Code ──────────────────────────────────────────────────────────────
   const handleSubmitCode = async () => {
-    console.log("🚀 [SUBMIT] Iniciando análisis");
-    console.log("📄 activeFile:", activeFile);
-    console.log("🧠 sesionId:", sesionId);
-    console.log("👤 usuarioId:", usuarioId);
-
-    if (!sesionId) {
-      console.warn("⚠️ No hay sesion_id — enviando en modo libre sin persistencia");
-    }
-
     setSubmitStatus("running");
     setSubmitMessage("Analizando código...");
 
     if (!fileSystem[activeFile]) {
-      console.error("❌ El archivo activo no existe en fileSystem:", activeFile);
       setSubmitStatus("error");
       setSubmitMessage("El archivo activo no existe");
       setTimeout(() => setSubmitStatus(null), 3000);
@@ -322,42 +452,26 @@ export default function IDE() {
     }
 
     const codigoCompleto = fileSystem[activeFile];
-    if (!codigoCompleto || codigoCompleto.trim().length === 0) {
-      console.error("❌ No hay código válido para enviar");
-      setSubmitStatus("error");
-      setSubmitMessage("No hay código para enviar");
-      setTimeout(() => setSubmitStatus(null), 3000);
-      return;
-    }
-    console.log("📦 código length:", codigoCompleto?.length);
-
     const frameworkApi = codeService.resolverFrameworkApi(selectedFramework);
-    console.log("🎯 Framework:", selectedFramework, "→ API:", frameworkApi);
 
     try {
-      const resultado = await codeService.analizarCodigo({
+      await codeService.analizarCodigo({
         codigo: codigoCompleto,
         framework: frameworkApi,
         sesion_id: sesionId,
-        usuario_id: usuarioId,
         active_file: activeFile,
         files: fileSystem,
       });
-
-      console.log("📦 resultado backend:", resultado);
 
       setSubmitStatus("success");
       setSubmitMessage("¡Análisis completado!");
 
       if (sesionId) {
-        console.log("➡️ REDIRECT A:", `/dashboard/developer/interviews/analisis/${sesionId}`);
         window.location.href = `${env.FRONTEND_BASE_URL}/dashboard/developer/interviews/analisis/${sesionId}`;
       } else {
-        console.log("ℹ️ Sin sesion_id, no hay redirección");
         setTimeout(() => setSubmitStatus(null), 3000);
       }
     } catch (error) {
-      console.error("❌ Error al analizar código:", error);
       setSubmitStatus("error");
       setSubmitMessage("Error al analizar el código");
       setTimeout(() => setSubmitStatus(null), 3000);
@@ -367,7 +481,7 @@ export default function IDE() {
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme }}>
       <div
-        className="flex flex-col h-full w-full relative font-mono"
+        className="flex flex-col h-full w-full relative font-mono select-none"
         style={cssVars as React.CSSProperties}
       >
         {isBootingUi && (
@@ -391,7 +505,6 @@ export default function IDE() {
           activeFile={activeFile}
         />
 
-        {/* Banner informativo (ya no es modo entrevista restrictivo) */}
         {sesionId && (
           <div
             className="flex items-center justify-center px-4 text-[11px] font-semibold uppercase tracking-widest shrink-0"
@@ -414,7 +527,7 @@ export default function IDE() {
             {["Edit", "Selection", "View", "Go"].map((item) => (
               <span
                 key={item}
-                className="cursor-pointer hover:opacity-100 opacity-80 transition-opacity"
+                className="opacity-80"
                 style={{ color: "var(--text-primary)" }}
               >
                 {item}
@@ -459,12 +572,11 @@ export default function IDE() {
         </div>
 
         <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 22px - 36px - 28px)" }}>
-          <LeftPanel />
           <ActivityBar activeView={activeView} onViewChange={handleViewChange} />
 
-          {/* Sidebar — SIEMPRE RENDERIZADO si isSidebarVisible es true */}
           {isSidebarVisible && (
             <>
+              {/* ✅ SIDEBAR CON handleFsUpdate CORRECTAMENTE PASADO */}
               <Sidebar
                 activeView={activeView}
                 activeFile={activeFile}
@@ -476,28 +588,25 @@ export default function IDE() {
                 onToggleOpen={() => {}}
                 isVisible={isSidebarVisible}
                 width={sidebarWidth}
+                onFsUpdate={handleFsUpdate} // ✅ VERIFICAR QUE ESTO EXISTA
               />
               <div
-                className="cursor-ew-resize hover:bg-accent transition-colors"
+                className="cursor-ew-resize transition-colors w-[4px] hover:bg-[var(--accent)] active:bg-[var(--accent)] shrink-0 z-20"
                 style={{
                   background: isResizingSidebar ? "var(--accent)" : "transparent",
-                  width: "3px",
-                  flexShrink: 0,
                 }}
                 onMouseDown={() => setIsResizingSidebar(true)}
               />
             </>
           )}
 
-          <div className="flex flex-col flex-1 h-full min-w-0">
+          <div className="flex flex-col flex-1 h-full min-w-0 relative">
             <div
               className="flex-1 min-h-0 relative flex flex-row"
               style={{
                 background: "var(--bg-primary)",
-                height: isTerminalVisible
-                  ? `calc(100% - ${terminalHeight}px)`
-                  : "100%",
-                transition: isResizingTerminal ? "none" : "height 0.2s ease",
+                height: isTerminalVisible ? `calc(100% - ${terminalHeight}px)` : "100%",
+                transition: isResizingTerminal ? "none" : "height 0.15s ease-out",
               }}
             >
               {isBooting ? (
@@ -513,97 +622,105 @@ export default function IDE() {
                     className="flex-1 min-w-0 h-full"
                     style={{
                       width: isPreviewVisible ? `calc(100% - ${previewWidth}px)` : "100%",
-                      transition: isResizingPreview ? "none" : "width 0.2s ease",
+                      transition: isResizingPreview ? "none" : "width 0.15s ease-out",
                     }}
                   >
                     <EditorArea
                       activeFile={activeFile}
                       fileSystem={fileSystem}
                       onCursorChange={handleCursorChange}
+                      onSelectFile={setActiveFile}
+                      onContentChange={handleContentChange}
                     />
                   </div>
 
-                  {isPreviewVisible && (
-                    <div
-                      className="cursor-ew-resize hover:bg-accent transition-colors"
-                      style={{
-                        background: isResizingPreview ? "var(--accent)" : "transparent",
-                        width: "3px",
-                        flexShrink: 0,
-                      }}
-                      onMouseDown={() => setIsResizingPreview(true)}
-                    />
-                  )}
+                  {/* BARRA SEPARADORA DE PREVIEW OPTIMIZADA */}
+                  <div
+                    className="cursor-ew-resize w-[5px] hover:bg-[var(--accent)] active:bg-[var(--accent)] shrink-0 z-20 relative transition-colors"
+                    style={{
+                      background: isResizingPreview ? "var(--accent)" : "transparent",
+                      display: isPreviewVisible ? "block" : "none"
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setIsResizingPreview(true);
+                    }}
+                  />
 
-                  {isPreviewVisible && (
-                    <div
-                      className="h-full flex flex-col"
-                      style={{
-                        width: `${previewWidth}px`,
-                        minWidth: "200px",
-                        maxWidth: "70vw",
-                        transition: isResizingPreview ? "none" : "width 0.2s ease",
-                      }}
-                    >
-                      <PreviewArea
-                        isVisible={isPreviewVisible}
-                        onToggleVisibility={togglePreviewVisibility}
-                      />
-                    </div>
-                  )}
+                  {/* CONTENEDOR PREVIEW TOTALMENTE PERSISTENTE */}
+                  <div
+                    className="h-full flex flex-col shrink-0 relative"
+                    style={{
+                      width: isPreviewVisible ? `${previewWidth}px` : "0px",
+                      minWidth: isPreviewVisible ? "150px" : "0px",
+                      maxWidth: "85vw",
+                      transition: isResizingPreview ? "none" : "width 0.15s ease-out",
+                      overflow: "hidden",
+                      visibility: isPreviewVisible ? "visible" : "hidden",
+                      opacity: isPreviewVisible ? 1 : 0,
+                      pointerEvents: isPreviewVisible ? "auto" : "none"
+                    }}
+                  >
+                    <PreviewArea
+                      isVisible={isPreviewVisible}
+                      onToggleVisibility={togglePreviewVisibility}
+                      isResizingParent={isResizingPreview}
+                    />
+                  </div>
                 </>
               )}
             </div>
 
-            {/* Terminal — SIEMPRE RENDERIZADA si isTerminalVisible es true */}
-            {isTerminalVisible && (
-              <div
-                className="cursor-ns-resize hover:bg-accent transition-colors"
-                style={{
-                  background: isResizingTerminal ? "var(--accent)" : "transparent",
-                  height: "3px",
-                  flexShrink: 0,
-                }}
-                onMouseDown={() => setIsResizingTerminal(true)}
-              />
-            )}
+            {/* BARRA SEPARADORA DE LA TERMINAL */}
+            <div
+              className="cursor-ns-resize hover:bg-[var(--accent)] active:bg-[var(--accent)] h-[4px] shrink-0 z-20 transition-colors"
+              style={{
+                background: isResizingTerminal ? "var(--accent)" : "transparent",
+              }}
+              onMouseDown={() => setIsResizingTerminal(true)}
+            />
 
-            {isTerminalVisible && (
+            {/* CONTENEDOR DE LA TERMINAL PERSISTENTE */}
+            <div
+              className="border-t flex flex-col shrink-0"
+              style={{
+                height: isTerminalVisible ? `${terminalHeight}px` : "0px",
+                minHeight: isTerminalVisible ? "50px" : "0px",
+                maxHeight: "70vh",
+                background: "var(--bg-primary)",
+                borderColor: "var(--border)",
+                transition: isResizingTerminal ? "none" : "height 0.15s ease-out",
+                overflow: "hidden",
+                visibility: isTerminalVisible ? "visible" : "hidden",
+                opacity: isTerminalVisible ? 1 : 0,
+                pointerEvents: isTerminalVisible ? "auto" : "none"
+              }}
+            >
               <div
-                className="border-t flex flex-col shrink-0"
-                style={{
-                  height: `${terminalHeight}px`,
-                  minHeight: "50px",
-                  maxHeight: "70vh",
-                  background: "var(--bg-primary)",
-                  borderColor: "var(--border)",
-                  transition: isResizingTerminal ? "none" : "height 0.2s ease",
-                }}
+                className="flex h-9 border-b items-center px-4 select-none"
+                style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
               >
-                <div
-                  className="flex h-9 border-b items-center px-4"
-                  style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
+                <span
+                  onClick={toggleTerminalVisibility}
+                  className="text-[11px] font-semibold uppercase cursor-pointer border-b h-full flex items-center mb-[-1px] hover:opacity-80 transition-opacity"
+                  style={{ color: "var(--text-primary)", borderColor: "var(--accent)" }}
                 >
-                  <span
-                    onClick={toggleTerminalVisibility}
-                    className="text-[11px] font-semibold uppercase cursor-pointer border-b h-full flex items-center mb-[-1px] hover:opacity-80 transition-opacity"
-                    style={{ color: "var(--text-primary)", borderColor: "var(--accent)" }}
-                  >
-                    Terminal
-                  </span>
-                </div>
-                <div className="flex-1 relative overflow-hidden" style={{ background: "var(--bg-primary)" }}>
-                  <TerminalArea
-                    isBooting={isBooting}
-                    onReady={() => {
-                      setTimeout(() => terminalAreaRef.current?.fitTerminal?.(), 100);
-                    }}
-                  />
-                </div>
+                  Terminal
+                </span>
               </div>
-            )}
+              <div className="flex-1 relative overflow-hidden" style={{ background: "var(--bg-primary)" }}>
+                <TerminalArea
+                  ref={terminalAreaRef}
+                  isBooting={isBooting}
+                  isVisible={isTerminalVisible}
+                  framework={selectedFramework}
+                  onReady={() => {
+                    setTimeout(() => terminalAreaRef.current?.fitTerminal(), 100);
+                  }}
+                />
+              </div>
+            </div>
 
-            {/* Barra inferior con Submit */}
             <div
               className="flex items-center justify-end gap-3 px-4 py-2 shrink-0 border-t"
               style={{ background: "var(--bg-secondary)", borderColor: "var(--border)" }}
@@ -619,8 +736,6 @@ export default function IDE() {
               {submitStatus === "error" && (
                 <span className="text-[12px] text-red-400 font-semibold">✗ {submitMessage || "Error al analizar"}</span>
               )}
-
-              
 
               <button
                 onClick={handleSubmitCode}

@@ -1,331 +1,1891 @@
-fronted/ide/page.ts:
-'use client'
+"""
+app/services/rag/rag_service.py
 
-import { useRouter } from 'next/navigation';
-import { useAuth } from '../../../../contexts/AuthContext';
-import { useState } from 'react';
+Orquestador RAG puro: retriever + prompt + LLM.
+Sin lógica de negocio ni persistencia — eso va en generacion/ y evaluacion/.
 
-export default function IDEPage() {
-  const { user, logout } = useAuth();
-  const router = useRouter();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isLoadingVue, setIsLoadingVue] = useState(false);
-  const [isLoadingNext, setIsLoadingNext] = useState(false);
+MEJORAS:
+  - Captura LLMRateLimitError y la convierte en HTTPException 429 legible
+  - Logs de duración para detectar cuellos de botella
+  - Soporte para pasar archivos del proyecto para filtrado inteligente
+  - Logs detallados del tamaño del prompt para debugging
+  - Reporte de archivos filtrados y sus tamaños
+"""
 
-  const handleLogout = async () => {
-    try {
-      setIsLoggingOut(true);
-      await logout();
-      router.push('/');
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-      setIsLoggingOut(false);
-    }
-  };
+import logging
+import random
+import time
+from typing import Optional
 
-  const handleOpenIDE = async (framework: 'vuejs' | 'nextjs') => {
-    const setLoading = framework === 'vuejs' ? setIsLoadingVue : setIsLoadingNext;
-    setLoading(true);
+from fastapi import HTTPException, Request, status
 
-    // ✅ Abrir ventana inmediatamente (User Gesture Requirement)
-    const ideWindow = window.open('', '_blank');
+from app.services.llm.client import LLMRateLimitError, llm_client
+from app.services.llm.prompts.preguntas_prompts import build_question_prompt
+from app.services.llm.prompts.evaluacion_prompts import build_code_analysis_prompt
+from app.services.llm.parser import parse_llm_json
 
-    if (!ideWindow) {
-      console.error('❌ El navegador bloqueó el popup');
-      alert(
-        'Tu navegador bloqueó la ventana emergente.\n\nHabilita los popups para este sitio y vuelve a intentarlo.'
-      );
-      setLoading(false);
-      return;
-    }
+logger = logging.getLogger(__name__)
 
-    // Mostrar carga mínima mientras se crea la sesión
-    ideWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Cargando IDE...</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              background: #0f172a;
-              color: #94a3b8;
-              font-family: 'JetBrains Mono', monospace, sans-serif;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              gap: 20px;
-            }
-            .spinner {
-              width: 40px; height: 40px;
-              border: 3px solid #1e293b;
-              border-top-color: #22c55e;
-              border-radius: 50%;
-              animation: spin 0.7s linear infinite;
-            }
-            @keyframes spin { to { transform: rotate(360deg); } }
-            p { font-size: 13px; letter-spacing: 0.08em; }
-          </style>
-        </head>
-        <body>
-          <div class="spinner"></div>
-          <p>Iniciando entorno...</p>
-        </body>
-      </html>
-    `);
 
-    try {
-      const accessToken = localStorage.getItem('accessToken');
+class RAGService:
+    """
+    Orquesta el pipeline RAG:
+      1. Obtiene el retriever de app.state (ya conectado al arranque)
+      2. Busca fragmentos relevantes en OpenSearch
+      3. Construye el prompt con el contexto
+      4. Llama al LLM y parsea la respuesta
+    """
 
-      if (!accessToken) {
-        throw new Error('No hay accessToken en localStorage');
-      }
+    def __init__(self, request: Optional[Request] = None):
+        self._request = request
 
-      if (!user?.id) {
-        throw new Error('No existe user.id en el contexto de autenticación');
-      }
+    def _get_retriever(self):
+        """
+        Obtiene el VectorStoreRetriever desde app.state.
+        Retorna None si no está disponible (RAG degradado).
+        """
+        if self._request and hasattr(self._request.app.state, "vector_store"):
+            return self._request.app.state.vector_store
+        logger.warning("⚠️  vector_store no disponible en app.state — RAG desactivado")
+        return None
 
-      const apiBase =
-        process.env.NEXT_PUBLIC_RAG_API_URL || 'http://localhost:8000';
+    async def recuperar_contexto(
+        self,
+        query: str,
+        framework: Optional[str] = None,
+        top_k: int = 5,
+    ) -> str:
+        """
+        Busca fragmentos relevantes en OpenSearch para la query dada.
+        Retorna string vacío si el retriever no está disponible.
+        """
+        retriever = self._get_retriever()
+        if not retriever:
+            return ""
 
-      // ✅ PASO 1: Crear sesión RÁPIDO (< 100ms) - SOLO crear sesión, sin generar pregunta
-      const sesionResponse = await fetch(
-        `${apiBase}/preguntas/iniciar-sesion/${framework}`,
+        try:
+            t0 = time.perf_counter()
+            contexto = await retriever.buscar(
+                query=query,
+                framework=framework,
+                top_k=top_k,
+            )
+            elapsed = time.perf_counter() - t0
+            logger.debug(
+                "RAG búsqueda OK | framework=%s | chars=%d | %.2fs",
+                framework, len(contexto), elapsed,
+            )
+            return contexto
+        except Exception as exc:
+            logger.error("❌ Error en búsqueda RAG: %s", exc)
+            return ""
+
+    async def generar_pregunta(
+        self,
+        framework: str,
+        contexto_adaptativo: Optional[str] = None,
+    ) -> dict:
+        """
+        Pipeline completo para generar una pregunta de entrevista.
+
+        Args:
+            framework:           Tecnología objetivo ("Vue.js", "React", etc.)
+            contexto_adaptativo: Texto con debilidades del usuario para preguntas adaptativas.
+
+        Returns:
+            Dict con la estructura RespuestaPregunta del LLM.
+
+        Raises:
+            HTTPException 429: si Groq está en rate limit tras todos los reintentos.
+        """
+        query        = _build_pregunta_query(framework)
+        contexto_rag = await self.recuperar_contexto(query=query, framework=framework)
+
+        messages = build_question_prompt(
+            contexto_rag=contexto_rag,
+            framework=framework,
+            contexto_adaptativo=contexto_adaptativo,
+        )
+
+        try:
+            t0  = time.perf_counter()
+            raw = await llm_client.chat(messages=messages)
+            logger.info(
+                "✅ Pregunta generada | framework=%s | %.2fs",
+                framework, time.perf_counter() - t0,
+            )
+        except LLMRateLimitError as exc:
+            logger.warning("🚨 Rate limit al generar pregunta: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="El servicio de IA está temporalmente saturado. "
+                       "Intenta de nuevo en unos segundos.",
+            ) from exc
+
+        resultado = parse_llm_json(raw, fallback_key="pregunta_practica")
+        return resultado
+
+    async def analizar_codigo(
+        self,
+        codigo: str,
+        framework: str,
+        contexto_proyecto: str = "",
+        files: Optional[dict[str, str]] = None,
+    ) -> dict:
+        """
+        Pipeline completo para analizar código de un candidato.
+
+        Args:
+            codigo:            Código enviado por el usuario.
+            framework:         Tecnología objetivo.
+            contexto_proyecto: Archivos adicionales del IDE (string ya formateado).
+            files:             Diccionario de archivos del proyecto para filtrado inteligente.
+
+        Returns:
+            Dict con la estructura RespuestaAnalisisCodigo del LLM.
+
+        Raises:
+            HTTPException 429: si Groq está en rate limit tras todos los reintentos.
+        """
+        # =====================================================================
+        # 1. LOG DE ENTRADA - QUÉ RECIBIMOS
+        # =====================================================================
+        logger.info("=" * 80)
+        logger.info("🔍 RAGService.analizar_codigo - INICIO")
+        logger.info(f"📋 Framework: {framework}")
+        logger.info(f"📝 Longitud código principal: {len(codigo):,} caracteres")
+        logger.info(f"📦 Contexto proyecto (pre-formateado): {len(contexto_proyecto):,} caracteres")
+        logger.info(f"📂 Archivos recibidos: {len(files) if files else 0}")
+        
+        # =====================================================================
+        # 2. LOG DETALLADO DE ARCHIVOS RECIBIDOS
+        # =====================================================================
+        if files:
+            logger.info("-" * 60)
+            logger.info("📋 ARCHIVOS RECIBIDOS DEL FRONTEND:")
+            
+            # Calcular tamaño total
+            total_files_size = 0
+            file_list = []
+            
+            for path, content in files.items():
+                size = len(content)
+                total_files_size += size
+                file_list.append((path, size))
+            
+            # Ordenar por tamaño (mayor a menor)
+            file_list.sort(key=lambda x: x[1], reverse=True)
+            
+            # Mostrar todos los archivos con sus tamaños
+            for path, size in file_list[:20]:  # Mostrar primeros 20
+                size_kb = size / 1024
+                if size > 10000:
+                    logger.warning(f"   ⚠️ {path}: {size:,} chars ({size_kb:.1f} KB) - ¡MUY GRANDE!")
+                elif size > 5000:
+                    logger.warning(f"   ⚠️ {path}: {size:,} chars ({size_kb:.1f} KB) - Grande")
+                else:
+                    logger.info(f"   📄 {path}: {size:,} chars ({size_kb:.1f} KB)")
+            
+            if len(file_list) > 20:
+                logger.info(f"   ... y {len(file_list) - 20} archivos más")
+            
+            logger.info(f"📊 TOTAL ARCHIVOS: {len(file_list)}")
+            logger.info(f"📊 TAMAÑO TOTAL ARCHIVOS: {total_files_size:,} caracteres ({total_files_size/1024:.1f} KB)")
+            
+            # Detectar archivos problemáticos
+            large_files = [(p, s) for p, s in file_list if s > 10000]
+            if large_files:
+                logger.warning("=" * 60)
+                logger.warning("⚠️ ARCHIVOS PROBLEMÁTICOS DETECTADOS (>10KB):")
+                for path, size in large_files:
+                    logger.warning(f"   🔴 {path}: {size:,} caracteres")
+                logger.warning("⚠️ Estos archivos serán TRUNCADOS o IGNORADOS en el prompt")
+                logger.warning("=" * 60)
+            
+            # Detectar archivos sospechosos (node_modules, dist, etc.)
+            suspicious = [p for p in files.keys() if any(x in p.lower() for x in ['node_modules', 'dist', 'build', '.git', 'lock'])]
+            if suspicious:
+                logger.warning(f"⚠️ ARCHIVOS SOSPECHOSOS (posiblemente irrelevantes): {len(suspicious)}")
+                for path in suspicious[:10]:
+                    logger.warning(f"   ⚠️ {path}")
+        else:
+            logger.info("📂 No se recibieron archivos del frontend")
+        
+        # =====================================================================
+        # 3. BÚSQUEDA RAG
+        # =====================================================================
+        query = f"buenas prácticas {framework} code review patrones arquitectura"
+        logger.info("-" * 60)
+        logger.info(f"📚 Query RAG: {query}")
+        
+        contexto_rag = await self.recuperar_contexto(query=query, framework=framework)
+        logger.info(f"📚 Contexto RAG obtenido: {len(contexto_rag):,} caracteres")
+
+        # =====================================================================
+        # 4. CONSTRUCCIÓN DEL PROMPT
+        # =====================================================================
+        logger.info("-" * 60)
+        logger.info("📝 Construyendo prompt (con filtrado inteligente de archivos)...")
+        
+        prompt_messages = build_code_analysis_prompt(
+            codigo=codigo,
+            framework=framework,
+            contexto_proyecto=contexto_proyecto,
+            contexto_rag=contexto_rag,
+            files=files,
+        )
+
+        # =====================================================================
+        # 5. LOG DEL TAMAÑO DEL PROMPT (¡CRÍTICO PARA DEBUG!)
+        # =====================================================================
+        logger.info("-" * 60)
+        logger.info("📊 ANÁLISIS DE TAMAÑO DEL PROMPT:")
+        
+        total_size = 0
+        message_sizes = []
+        
+        for msg in prompt_messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            size = len(content)
+            total_size += size
+            message_sizes.append((role, size))
+            
+            # Mostrar tamaño por mensaje
+            if size > 10000:
+                logger.warning(f"   ⚠️ Mensaje {role}: {size:,} caracteres ({size/1024:.1f} KB) - MUY GRANDE")
+            elif size > 5000:
+                logger.warning(f"   ⚠️ Mensaje {role}: {size:,} caracteres ({size/1024:.1f} KB) - Grande")
+            else:
+                logger.info(f"   ✅ Mensaje {role}: {size:,} caracteres ({size/1024:.1f} KB)")
+        
+        logger.info(f"📊 TOTAL PROMPT: {total_size:,} caracteres ({total_size/1024:.1f} KB)")
+        
+        # Advertencia por tamaño excesivo
+        if total_size > 50000:
+            logger.error("=" * 60)
+            logger.error(f"❌ PROMPT DEMASIADO GRANDE: {total_size:,} caracteres")
+            logger.error("📌 Límites típicos de Groq:")
+            logger.error("   - Modelo llama-3.3-70b: ~8,000-10,000 tokens (~32,000-40,000 caracteres)")
+            logger.error("   - Modelo mixtral-8x7b: ~8,000-16,000 tokens (~32,000-64,000 caracteres)")
+            logger.error(f"   - Tu prompt: ~{total_size/4:.0f} tokens estimados")
+            logger.error("")
+            logger.error("🛠️ SOLUCIONES:")
+            logger.error("   1. Filtrar más archivos en el frontend (node_modules, dist, etc.)")
+            logger.error("   2. Reducir el tamaño de truncamiento de archivos")
+            logger.error("   3. Usar un modelo con mayor contexto (llama-3.1-8b-instant)")
+            logger.error("=" * 60)
+        elif total_size > 30000:
+            logger.warning("=" * 60)
+            logger.warning(f"⚠️ PROMPT GRANDE: {total_size:,} caracteres")
+            logger.warning(f"📌 Estimado: ~{total_size/4:.0f} tokens")
+            logger.warning("   Puede funcionar pero está cerca del límite")
+            logger.warning("=" * 60)
+        else:
+            logger.info(f"✅ Tamaño del prompt dentro de límites aceptables")
+        
+        # Mostrar preview del prompt (primeros 500 caracteres del usuario)
+        if prompt_messages:
+            user_content = prompt_messages[-1].get("content", "")
+            preview = user_content[:500].replace("\n", " ")
+            logger.info(f"📄 PREVIEW del prompt: {preview}...")
+
+        # =====================================================================
+        # 6. LLAMA AL LLM
+        # =====================================================================
+        try:
+            t0 = time.perf_counter()
+            logger.info("-" * 60)
+            logger.info("🤖 Enviando prompt a Groq API...")
+            
+            raw = await llm_client.chat(messages=prompt_messages, temperature=0.3)
+            
+            elapsed = time.perf_counter() - t0
+            logger.info(f"✅ Respuesta recibida en {elapsed:.2f} segundos")
+            logger.info(f"📊 Longitud respuesta: {len(raw):,} caracteres")
+            
+        except LLMRateLimitError as exc:
+            logger.error("=" * 60)
+            logger.error(f"🚨 RATE LIMIT EXCEDIDO: {exc}")
+            logger.error("⏳ Espera unos segundos antes de reintentar")
+            logger.error("=" * 60)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="El servicio de IA está temporalmente saturado. "
+                       "Intenta de nuevo en unos segundos.",
+            ) from exc
+        
+        except Exception as exc:
+            logger.error("=" * 60)
+            logger.error(f"❌ ERROR INESPERADO EN LLM: {type(exc).__name__}")
+            logger.error(f"Mensaje: {exc}")
+            logger.error("=" * 60)
+            raise
+
+        # =====================================================================
+        # 7. PARSEO DE LA RESPUESTA
+        # =====================================================================
+        logger.info("-" * 60)
+        logger.info("📊 Parseando respuesta JSON del LLM...")
+        
+        try:
+            resultado = parse_llm_json(raw, fallback_key="calificacion_general")
+            logger.info("✅ JSON parseado exitosamente")
+        except Exception as exc:
+            logger.error(f"❌ Error parseando JSON: {exc}")
+            logger.error(f"Raw response (primeros 500 chars): {raw[:500]}")
+            raise
+        
+        # =====================================================================
+        # 8. LOG DEL RESULTADO
+        # =====================================================================
+        if resultado and "calificacion_general" in resultado:
+            calif = resultado["calificacion_general"]
+            logger.info("-" * 60)
+            logger.info("📊 RESUMEN DEL RESULTADO:")
+            logger.info(f"   ⭐ Puntaje: {calif.get('puntaje', 'N/A')}")
+            logger.info(f"   🏆 Nivel: {calif.get('nivel', 'N/A')}")
+            logger.info(f"   ✅ Apto contratación: {calif.get('apto_para_contratacion', 'N/A')}")
+            logger.info(f"   📝 Nivel candidato: {calif.get('nivel_candidato', 'N/A')}")
+            
+            if "pilares_tecnicos" in resultado:
+                pilares = resultado["pilares_tecnicos"]
+                logger.info("   📊 Pilares técnicos:")
+                for key, value in pilares.items():
+                    logger.info(f"      - {key}: {value}")
+        
+        logger.info("=" * 80)
+        logger.info("✅ RAGService.analizar_codigo - COMPLETADO EXITOSAMENTE")
+        logger.info("=" * 80)
+        
+        return resultado
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS INTERNOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+_QUERIES_POR_FRAMEWORK: dict[str, list[str]] = {
+    "Vue.js":     [
+        "composables reactividad Composition API",
+        "Pinia store gestión de estado",
+        "Vue Router guards navegación",
+        "componentes asíncronos Suspense",
+        "performance optimización watchers computed",
+    ],
+    "Next.js":    [
+        "Server Components App Router streaming",
+        "ISR revalidación caching estratégico",
+        "middleware autenticación rutas protegidas",
+        "Server Actions formularios mutaciones",
+        "optimización Core Web Vitals performance",
+    ],
+    "React":      [
+        "hooks personalizados patrones avanzados",
+        "Context API gestión estado global",
+        "React Query server state caching",
+        "optimización renders memo useCallback",
+        "Suspense concurrent features",
+    ],
+    "TypeScript": [
+        "generics utility types avanzados",
+        "discriminated unions type narrowing",
+        "mapped types conditional types",
+        "inferencia tipos hooks React",
+        "template literal types rutas API",
+    ],
+    "JavaScript": [
+        "closures scope cadena de prototipos",
+        "Promises async await manejo errores",
+        "event loop microtasks macrotasks",
+        "Proxy Reflect patrones metaprogramación",
+        "generators iteradores programación funcional",
+    ],
+    "CSS":        [
+        "CSS Grid layout áreas nombradas",
+        "custom properties temas dinámicos",
+        "animaciones performance transform",
+        "container queries responsive design",
+        "accesibilidad contraste focus",
+    ],
+}
+
+_QUERY_GENERICA = [
+    "patrones arquitectura frontend buenas prácticas",
+    "performance optimización código producción",
+    "clean code principios SOLID frontend",
+]
+
+
+def _build_pregunta_query(framework: str) -> str:
+    """Selecciona una query aleatoria para diversidad semántica."""
+    queries = _QUERIES_POR_FRAMEWORK.get(framework, _QUERY_GENERICA)
+    return random.choice(queries) 
+
+
+
+
+
+
+
+
+"""
+app/services/llm/prompts/evaluacion_prompts.py
+
+Prompts para análisis y evaluación de código del candidato.
+"""
+
+import logging
+import os
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Límites para evitar prompts demasiado largos
+MAX_CODE_LENGTH = 10000          # Máximo de caracteres del código
+MAX_CONTEXT_LENGTH = 5000        # Máximo del contexto del proyecto
+MAX_RAG_LENGTH = 3000            # Máximo del contexto RAG
+
+# Extensiones de archivos relevantes para análisis de código
+RELEVANT_EXTENSIONS = {
+    '.vue', '.js', '.ts', '.jsx', '.tsx',      # Frontend
+    '.html', '.css', '.scss', '.sass',         # Estilos
+    '.json',                                    # Configuración importante
+    '.py', '.java', '.go', '.rs',              # Backend
+}
+
+# Archivos a ignorar (no relevantes para evaluación de código)
+IGNORED_FILES = {
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',  # Lock files
+    '.env', '.env.local', '.env.production',             # Environment
+    'README.md', 'CHANGELOG.md', 'LICENSE',              # Docs
+    'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json',  # Config TS
+    'vite.config.ts', 'webpack.config.js',               # Build config
+    '.gitignore', '.dockerignore',                       # Ignore files
+}
+
+# Patrones de directorios a ignorar (por nombre)
+IGNORED_DIRECTORIES = {
+    'node_modules', 'dist', 'build', '.next', '.nuxt',
+    '.git', '.vscode', '.idea', '__pycache__', 'venv',
+    'env', 'coverage', '.cache'
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SYSTEM PROMPT (simplificado para reducir tamaño)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SYSTEM = """\
+Eres un revisor de código senior especializado en {framework}.
+
+REGLAS:
+1. Usa slugs: consumo_apis, manejo_estado, async_await, componentes_props, css_layout, typescript_tipos, inmutabilidad, optimizacion_renders, arquitectura_general
+2. Clasifica error por impacto: critico|alto|medio|bajo
+3. Clasifica candidato: descartado|revisar|promisorio|recomendado|destacado
+4. Responde SOLO con JSON válido, sin markdown.
+
+JSON esperado:
+{{
+  "calificacion_general": {{
+    "nivel": "string",
+    "nivel_candidato": "string",
+    "puntaje": 0-100,
+    "apto_para_contratacion": true/false,
+    "resumen": "string",
+    "resumen_para_reclutador": "string"
+  }},
+  "pilares_tecnicos": {{
+    "puntaje_javascript": 0-100,
+    "puntaje_arquitectura": 0-100,
+    "puntaje_buenas_practicas": 0-100,
+    "puntaje_comunicacion": 0-100,
+    "puntaje_resolucion": 0-100
+  }},
+  "errores": [
+    {{
+      "categoria_slug": "string",
+      "tipo": "string",
+      "descripcion": "string",
+      "impacto": "critico|alto|medio|bajo",
+      "es_conceptual": false,
+      "linea_aproximada": null,
+      "fragmento_codigo": null,
+      "codigo_corregido": null,
+      "explicacion_ia": "string"
+    }}
+  ],
+  "buenas_practicas": ["string"],
+  "malas_practicas": ["string"],
+  "recomendaciones": [
+    {{
+      "tipo": "codigo|concepto|recurso|patron",
+      "titulo": "string",
+      "descripcion": "string",
+      "codigo_ejemplo": null,
+      "recurso_url": null,
+      "recurso_titulo": null,
+      "prioridad": "alta|media|baja",
+      "orden": 0,
+      "categoria_slug": null
+    }}
+  ],
+  "evaluacion_tecnica": {{
+    "manejo_estado": "string",
+    "legibilidad": "string",
+    "arquitectura": "string",
+    "performance": "string",
+    "comunicacion": "string"
+  }}
+}}
+"""
+
+
+def _should_ignore_path(path: str) -> bool:
+    """Verifica si un archivo o directorio debe ser ignorado"""
+    # Verificar directorios ignorados
+    path_parts = path.split('/')
+    for part in path_parts:
+        if part in IGNORED_DIRECTORIES:
+            return True
+
+    # Verificar archivos ignorados
+    filename = path.split('/')[-1]
+    if filename in IGNORED_FILES:
+        return True
+
+    return False
+
+
+def _filter_relevant_files(files: dict[str, str]) -> dict[str, str]:
+    """
+    Filtra solo los archivos relevantes para evaluación de código.
+    Excluye lock files, configs de build, directorios ignorados, etc.
+    """
+    if not files:
+        return {}
+
+    logger.info("-" * 60)
+    logger.info("🔍 FILTRANDO ARCHIVOS DEL PROYECTO")
+    logger.info(f"📂 Total archivos recibidos: {len(files)}")
+
+    filtered = {}
+    ignored_count = 0
+    large_files_count = 0
+
+    for path, content in files.items():
+        # Verificar si debe ser ignorado
+        if _should_ignore_path(path):
+            logger.debug(f"   ❌ IGNORADO (directorio/archivo): {path}")
+            ignored_count += 1
+            continue
+
+        # Verificar extensión relevante
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in RELEVANT_EXTENSIONS and ext != '':
+            logger.debug(f"   ❌ IGNORADO (extensión {ext}): {path}")
+            ignored_count += 1
+            continue
+
+        # Verificar tamaño del archivo
+        content_length = len(content)
+        if content_length > 10000:
+            logger.warning(f"   ⚠️ ARCHIVO GRANDE: {path} - {content_length} caracteres")
+            large_files_count += 1
+            # Truncar archivos muy grandes
+            content = content[:5000] + "\n... [archivo truncado por tamaño]"
+
+        filtered[path] = content
+        logger.info(f"   ✅ INCLUIDO: {path} ({len(content)} caracteres)")
+
+    logger.info("-" * 60)
+    logger.info(f"📊 RESUMEN FILTRADO:")
+    logger.info(f"   - Archivos incluidos: {len(filtered)}")
+    logger.info(f"   - Archivos ignorados: {ignored_count}")
+    logger.info(f"   - Archivos grandes (>10KB): {large_files_count}")
+    logger.info("-" * 60)
+
+    return filtered
+
+
+def _truncate_context(context: str, max_length: int, label: str) -> str:
+    """Trunca contexto si es demasiado largo"""
+    if len(context) > max_length:
+        logger.warning(f"⚠️ {label} truncado de {len(context)} a {max_length} caracteres")
+        return context[:max_length] + "\n... [contexto truncado]"
+    return context
+
+
+def build_code_analysis_prompt(
+    codigo: str,
+    framework: str,
+    contexto_proyecto: str = "",
+    contexto_rag: str = "",
+    files: dict[str, str] | None = None,
+) -> list[dict]:
+    """
+    Construye los mensajes para analizar código de un candidato.
+    Con filtrado inteligente de archivos y límites de tamaño.
+    """
+    # ⭐⭐⭐ LOG CRÍTICO PARA DEPURACIÓN ⭐⭐⭐
+    logger.info("=" * 80)
+    logger.info("📊 [PROMPT BUILD] INICIANDO CONSTRUCCIÓN")
+    logger.info(f"🔧 Framework: {framework}")
+    logger.info(f"📝 Código length: {len(codigo)} caracteres")
+    logger.info(f"📚 Contexto RAG length: {len(contexto_rag) if contexto_rag else 0} caracteres")
+    logger.info(f"📁 Contexto proyecto (pre-filtrado): {len(contexto_proyecto) if contexto_proyecto else 0} caracteres")
+
+    if files:
+        logger.info(f"📂 Archivos recibidos: {len(files)}")
+
+        # Mostrar resumen de archivos por tipo
+        ext_summary = {}
+        for path in files.keys():
+            ext = os.path.splitext(path)[1].lower() or 'sin_ext'
+            ext_summary[ext] = ext_summary.get(ext, 0) + 1
+
+        logger.info("📊 Resumen por extensión:")
+        for ext, count in sorted(ext_summary.items(), key=lambda x: x[1], reverse=True)[:10]:
+            logger.info(f"   - {ext}: {count} archivos")
+
+        # Mostrar los primeros 15 archivos
+        logger.info("📋 Lista de archivos (primeros 15):")
+        for i, path in enumerate(list(files.keys())[:15]):
+            content_len = len(files[path])
+            logger.info(f"   {i+1:2d}. {path} ({content_len} chars)")
+        if len(files) > 15:
+            logger.info(f"   ... y {len(files) - 15} archivos más")
+
+        # Buscar archivos sospechosamente grandes
+        logger.info("🔍 Buscando archivos potencialmente problemáticos:")
+        large_files = []
+        for path, content in files.items():
+            if len(content) > 50000:
+                large_files.append((path, len(content)))
+                logger.warning(f"   ⚠️ ARCHIVO EXTREMADAMENTE GRANDE: {path} - {len(content)} caracteres")
+            elif len(content) > 10000:
+                large_files.append((path, len(content)))
+                logger.warning(f"   ⚠️ Archivo grande: {path} - {len(content)} caracteres")
+
+        if not large_files:
+            logger.info("   ✅ No se encontraron archivos sospechosamente grandes")
+
+    logger.info("=" * 80)
+
+    # ── Limitar y limpiar código principal ──────────────────────────────────
+    codigo_limpio = codigo.strip()
+    if len(codigo_limpio) > MAX_CODE_LENGTH:
+        codigo_limpio = codigo_limpio[:MAX_CODE_LENGTH] + "\n... [código truncado]"
+        logger.warning(f"⚠️ Código truncado de {len(codigo)} a {MAX_CODE_LENGTH} caracteres")
+
+    # ── Filtrar archivos del proyecto si se pasaron ─────────────────────────
+    contexto_proyecto_filtrado = contexto_proyecto
+    if files:
+        filtered_files = _filter_relevant_files(files)
+        if filtered_files:
+            # Construir contexto solo con archivos relevantes
+            context_parts = []
+            for path, content in filtered_files.items():
+                # Limitar cada archivo individual
+                if len(content) > 3000:
+                    content = content[:3000] + "\n... [archivo truncado]"
+                context_parts.append(f"### Archivo: {path}\n```\n{content}\n```")
+            contexto_proyecto_filtrado = "\n\n".join(context_parts)
+            logger.info(f"📁 Contexto proyecto construido con {len(filtered_files)} archivos, {len(contexto_proyecto_filtrado)} caracteres")
+        else:
+            logger.warning("⚠️ No se encontraron archivos relevantes después del filtrado")
+            contexto_proyecto_filtrado = ""
+
+    # ── Limitar contexto RAG ────────────────────────────────────────────────
+    if contexto_rag and len(contexto_rag) > MAX_RAG_LENGTH:
+        contexto_rag = _truncate_context(contexto_rag, MAX_RAG_LENGTH, "Contexto RAG")
+
+    # ── Construir context block ─────────────────────────────────────────────
+    context_parts = []
+    if contexto_rag:
+        context_parts.append(f"BUENAS PRÁCTICAS:\n---\n{contexto_rag}\n---")
+        logger.info(f"📚 Contexto RAG incluido: {len(contexto_rag)} caracteres")
+
+    if contexto_proyecto_filtrado:
+        context_parts.append(f"ARCHIVOS DEL PROYECTO:\n---\n{contexto_proyecto_filtrado}\n---")
+        logger.info(f"📁 Contexto proyecto incluido: {len(contexto_proyecto_filtrado)} caracteres")
+
+    context_block = "\n\n".join(context_parts)
+
+    # ── Limitar contexto total ──────────────────────────────────────────────
+    if len(context_block) > MAX_CONTEXT_LENGTH:
+        context_block = _truncate_context(context_block, MAX_CONTEXT_LENGTH, "Contexto total")
+
+    # ── Construir mensaje final ─────────────────────────────────────────────
+    system = _SYSTEM.format(framework=framework)
+
+    lang_tag = framework.lower().replace(".", "").replace(" ", "")
+
+    user_content = f"""
+{context_block}
+
+CÓDIGO DEL CANDIDATO A EVALUAR:
+```{lang_tag}
+{codigo_limpio}
+```
+
+Analiza este código de {framework} y responde SOLO con el JSON solicitado.
+"""
+
+    logger.info(f"✅ [PROMPT BUILD] Prompt construido exitosamente")
+    logger.info(f"   - System prompt: {len(system)} caracteres")
+    logger.info(f"   - User content: {len(user_content)} caracteres")
+    logger.info("=" * 80)
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_content.strip()},
+    ]
+
+
+
+"""
+app/services/evaluacion/codigo_service.py
+
+Orquesta el pipeline completo de cierre de sesión:
+  guardar código → evaluar con IA → persistir en BD → actualizar perfil → finalizar sesión.
+
+Flujo único: 1 sesión → 1 envío → 1 evaluación.
+No existen borradores ni versiones parciales.
+"""
+
+import logging
+import re
+import time
+from typing import Literal, Optional
+from uuid import UUID
+
+from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.db.repositories import (
+    sesiones_repo,
+    evaluaciones_repo,
+    codigo_repo,
+    perfil_repo,
+)
+from app.schemas.evaluaciones import RespuestaAnalisisCodigo
+from app.services.rag.rag_service import RAGService
+from app.services.evaluacion.pilares_parser import PilaresParser
+from app.services.evaluacion.analytics_service import AnalyticsService
+from app.services.generacion.adaptativo_service import AdaptativoService
+
+logger = logging.getLogger(__name__)
+
+MotivoCierre = Literal["enviado", "tiempo_agotado"]
+
+_ESTADOS_FINALES = {"completada", "tiempo_agotado"}
+
+_ESTADO_POR_MOTIVO: dict[str, str] = {
+    "enviado":        "completada",
+    "tiempo_agotado": "tiempo_agotado",
+}
+
+
+class CodigoService:
+    """
+    Orquesta el pipeline completo de evaluación al cierre de sesión:
+      1. Guarda el código final
+      2. RAG recupera buenas prácticas relevantes
+      3. LLM analiza el código y retorna evaluación estructurada
+      4. Parsea los 5 pilares técnicos
+      5. Persiste todo en BD (envío, evaluación, errores, recomendaciones)
+      6. Actualiza perfil técnico y debilidades del usuario
+      7. Marca la sesión con el estado final correspondiente
+    """
+
+    def __init__(self, db: AsyncSession, request: Request):
+        self.db         = db
+        self.rag        = RAGService(request=request)
+        self.analytics  = AnalyticsService()
+        self.adaptativo = AdaptativoService(db=db)
+
+    async def finalizar_y_evaluar(
+        self,
+        sesion_id: str,
+        codigo: str,
+        framework: str,
+        contexto_proyecto: str = "",
+        motivo_cierre: MotivoCierre = "enviado",
+        usuario_id: Optional[UUID] = None,
+        files: Optional[dict[str, str]] = None,
+    ) -> RespuestaAnalisisCodigo:
+        """
+        Pipeline completo de cierre de sesión.
+
+        Args:
+            sesion_id:         UUID de la sesión activa.
+            codigo:            Código final del candidato.
+            framework:         Tecnología ("Vue.js", "React", etc.).
+            contexto_proyecto: Archivos adicionales del IDE (contexto ya construido).
+            motivo_cierre:     "enviado" | "tiempo_agotado".
+            usuario_id:        Opcional. Si es None se resuelve desde sesion.usuario_id.
+            files:             Diccionario de archivos del proyecto para filtrado en RAG.
+
+        Returns:
+            RespuestaAnalisisCodigo lista para el frontend.
+
+        Raises:
+            ValueError:        Si la sesión no existe.
+            HTTPException 429: Si el LLM está saturado (propagado desde RAGService).
+        """
+        t_total      = time.perf_counter()
+        sesion_uuid  = UUID(sesion_id)
+        estado_final = _ESTADO_POR_MOTIVO.get(motivo_cierre, "completada")
+
+        logger.info("=" * 80)
+        logger.info("🚀 INICIANDO CIERRE DE SESIÓN")
+        logger.info("📋 Sesion ID:  %s", sesion_uuid)
+        logger.info("🔧 Framework:  %s", framework)
+        logger.info("📝 Motivo:     %s", motivo_cierre)
+        logger.info("👤 Usuario ID: %s", usuario_id)
+        logger.info("📂 Archivos:   %d", len(files) if files else 0)
+        logger.info("=" * 80)
+
+        # ── Cargar sesión ─────────────────────────────────────────────────────
+        sesion = await sesiones_repo.get_sesion_por_id(self.db, sesion_uuid)
+        if not sesion:
+            logger.error("❌ Sesión %s no encontrada", sesion_uuid)
+            raise ValueError(f"Sesión {sesion_uuid} no encontrada.")
+
+        logger.info("✅ Sesión cargada - Estado actual: %s", sesion.estado)
+
+        # ── Protección contra doble submit ────────────────────────────────────
+        if sesion.estado in _ESTADOS_FINALES and sesion.evaluacion:
+            logger.warning(
+                "⚠️  DOBLE SUBMIT DETECTADO | sesion=%s | estado=%s — "
+                "retornando evaluación existente sin re-evaluar.",
+                sesion_uuid, sesion.estado,
+            )
+            return _construir_respuesta_desde_bd(sesion)
+
+        uid = usuario_id or sesion.usuario_id
+        logger.info("👤 Usuario efectivo: %s", uid)
+
+        # ── 1. Guardar código final ───────────────────────────────────────────
+        t0 = time.perf_counter()
+        logger.info("📝 [1/7] Guardando código final...")
+        envio = await codigo_repo.guardar_envio_codigo(
+            db=self.db,
+            sesion_id=sesion_uuid,
+            lenguaje=framework,
+            codigo=codigo,
+            es_envio_final=True,
+        )
+        logger.info("✅ Código guardado - Envio ID: %s (%.2fs)", envio.id, time.perf_counter() - t0)
+
+        # ── 2. RAG + LLM ──────────────────────────────────────────────────────
+        t0 = time.perf_counter()
+        logger.info("🤖 [2/7] Analizando código con IA...")
+        resultado_llm = await self.rag.analizar_codigo(
+            codigo=codigo,
+            framework=framework,
+            contexto_proyecto=contexto_proyecto,
+            files=files,
+        )
+        logger.info("✅ Análisis IA completado (%.2fs)", time.perf_counter() - t0)
+        logger.debug(
+            "📊 LLM - Puntaje: %s",
+            resultado_llm.get("calificacion_general", {}).get("puntaje"),
+        )
+
+        # ── 3. Parsear pilares técnicos ───────────────────────────────────────
+        logger.info("📊 [3/7] Parseando pilares técnicos...")
+        pilares = PilaresParser.parsear(resultado_llm)
+        logger.info("✅ Pilares: %s", {k: v for k, v in pilares.items() if v is not None})
+
+        # ── 4. Persistir evaluación completa ──────────────────────────────────
+        t0 = time.perf_counter()
+        logger.info("💾 [4/7] Persistiendo evaluación en BD...")
+
+        evaluacion = await self._guardar_evaluacion(
+            sesion_uuid=sesion_uuid,
+            resultado_llm=resultado_llm,
+            pilares=pilares,
+        )
+        logger.info("✅ Evaluación guardada - ID: %s", evaluacion.id)
+
+        errores_count = 0
+        try:
+            errores_raw = resultado_llm.get("errores", [])
+            logger.info("🐛 Guardando %d errores detectados...", len(errores_raw))
+            await self._guardar_errores(
+                sesion_uuid=sesion_uuid,
+                envio_id=envio.id,
+                errores=errores_raw,
+            )
+            errores_count = len(errores_raw)
+        except Exception as e:
+            logger.error("❌ Error guardando errores: %s", e, exc_info=True)
+
+        recom_count = 0
+        try:
+            recomendaciones_raw = resultado_llm.get("recomendaciones", [])
+            logger.info("📚 Guardando %d recomendaciones...", len(recomendaciones_raw))
+            await self._guardar_recomendaciones(
+                evaluacion_id=evaluacion.id,
+                recomendaciones=recomendaciones_raw,
+            )
+            recom_count = len(recomendaciones_raw)
+        except Exception as e:
+            logger.error("❌ Error guardando recomendaciones: %s", e, exc_info=True)
+
+        rubricas_count = 0
+        try:
+            evaluacion_tecnica = resultado_llm.get("evaluacion_tecnica", {})
+            if evaluacion_tecnica:
+                logger.info("📋 Guardando %d rúbricas técnicas...", len(evaluacion_tecnica))
+                await self._guardar_rubricas(
+                    evaluacion_id=evaluacion.id,
+                    evaluacion_tecnica=evaluacion_tecnica,
+                )
+                rubricas_count = len(evaluacion_tecnica)
+            else:
+                logger.info("📋 Sin rúbricas técnicas para guardar")
+        except Exception as e:
+            logger.error("❌ Error guardando rúbricas (continuando): %s", e, exc_info=True)
+            try:
+                await self.db.rollback()
+                logger.info("🔄 Rollback realizado tras error en rúbricas")
+            except Exception:
+                pass
+
+        logger.info(
+            "💾 Persistencia completada (%.2fs) — Evaluacion: %s | Errores: %d | Recom: %d | Rúbricas: %d",
+            time.perf_counter() - t0,
+            evaluacion.id,
+            errores_count,
+            recom_count,
+            rubricas_count,
+        )
+
+        # ── 5. Actualizar perfil del usuario ──────────────────────────────────
+        if uid:
+            t0 = time.perf_counter()
+            logger.info("👤 [5/7] Actualizando perfil del usuario %s...", uid)
+            errores_list = resultado_llm.get("errores", [])
+            if errores_list:
+                await self.adaptativo.registrar_debilidades_sesion(
+                    usuario_id=uid,
+                    sesion_id=sesion_uuid,
+                    errores=errores_list,
+                )
+            await perfil_repo.actualizar_estadisticas_usuario(self.db, uid)
+            await perfil_repo.actualizar_perfil_tecnico(self.db, uid)
+            logger.info("✅ Perfil actualizado (%.2fs)", time.perf_counter() - t0)
+        else:
+            logger.warning("⚠️ Sin usuario_id — saltando actualización de perfil")
+
+        # ── 6. Finalizar sesión ───────────────────────────────────────────────
+        logger.info("🏁 [6/7] Finalizando sesión con estado '%s'...", estado_final)
+        await sesiones_repo.finalizar_sesion(self.db, sesion_uuid, estado=estado_final)
+        logger.info("✅ Sesión finalizada")
+
+        logger.info("=" * 80)
+        logger.info("✅ SESIÓN CERRADA EXITOSAMENTE — %.2fs total", time.perf_counter() - t_total)
+        logger.info(
+            "   Sesion: %s | Estado: %s | Puntaje: %s | Errores: %d | Recom: %d",
+            sesion_uuid,
+            estado_final,
+            resultado_llm.get("calificacion_general", {}).get("puntaje"),
+            errores_count,
+            recom_count,
+        )
+        logger.info("=" * 80)
+
+        return _construir_respuesta(resultado_llm, pilares)
+
+    # ── Helpers privados de persistencia ──────────────────────────────────────
+
+    async def _guardar_evaluacion(
+        self,
+        sesion_uuid: UUID,
+        resultado_llm: dict,
+        pilares: dict,
+    ):
+        """Guarda la evaluación principal y retorna el objeto creado."""
+        cal = resultado_llm.get("calificacion_general", {})
+
+        def _safe_float(value, default: float = 0.0) -> float:
+            try:
+                if value is None:
+                    return default
+                if isinstance(value, (int, float)):
+                    return float(value)
+                match = re.search(r"\d+(\.\d+)?", str(value))
+                return float(match.group()) if match else default
+            except Exception:
+                return default
+
+        puntaje = _safe_float(cal.get("puntaje"), default=0.0)
+        if puntaje > 100:
+            logger.warning("⚠️ Puntaje fuera de rango (%.2f), ajustando a 100", puntaje)
+            puntaje = 100.0
+
+        logger.debug(
+            "💾 Guardando evaluación — Puntaje: %.2f | Nivel: %s",
+            puntaje,
+            cal.get("nivel_candidato"),
+        )
+
+        return await evaluaciones_repo.guardar_evaluacion(
+            db=self.db,
+            sesion_id=sesion_uuid,
+            puntaje_total=puntaje,
+            puntaje_javascript=pilares.get("puntaje_javascript"),
+            puntaje_arquitectura=pilares.get("puntaje_arquitectura"),
+            puntaje_buenas_practicas=pilares.get("puntaje_buenas_practicas"),
+            puntaje_comunicacion=pilares.get("puntaje_comunicacion"),
+            puntaje_resolucion=pilares.get("puntaje_resolucion"),
+            nivel_candidato=cal.get("nivel_candidato"),
+            apto_para_contratacion=cal.get("apto_para_contratacion"),
+            feedback_general=cal.get("resumen", "Sin resumen"),
+            resumen_para_reclutador=cal.get("resumen_para_reclutador"),
+            fortalezas="\n".join(resultado_llm.get("buenas_practicas", [])),
+            areas_mejora="\n".join(resultado_llm.get("malas_practicas", [])),
+            modelo_ia_usado=settings.LLM_MODEL,
+        )
+
+    async def _guardar_errores(
+        self,
+        sesion_uuid: UUID,
+        envio_id: UUID,
+        errores: list[dict],
+    ) -> None:
+        """Guarda los errores detectados."""
+        if not errores:
+            return
+
+        guardados = 0
+        saltados  = 0
+
+        for idx, error in enumerate(errores):
+            try:
+                categoria_slug = error.get("categoria_slug", "")
+                categoria_id = await evaluaciones_repo.get_categoria_error_id(
+                    db=self.db, slug=categoria_slug,
+                )
+
+                if not categoria_id:
+                    logger.warning(
+                        "⚠️ Categoría no encontrada | slug=%s | idx=%d",
+                        categoria_slug, idx,
+                    )
+                    saltados += 1
+                    continue
+
+                linea_raw = error.get("linea_aproximada")
+                linea = int(linea_raw) if linea_raw and str(linea_raw).isdigit() else None
+
+                await evaluaciones_repo.guardar_error_detectado(
+                    db=self.db,
+                    sesion_id=sesion_uuid,
+                    envio_codigo_id=envio_id,
+                    categoria_error_id=categoria_id,
+                    descripcion=error.get("descripcion", "Sin descripción"),
+                    severidad=error.get("impacto", "medio"),
+                    es_error_conceptual=error.get("es_conceptual", False),
+                    linea_codigo=linea,
+                    fragmento_codigo=error.get("fragmento_codigo"),
+                    codigo_corregido=error.get("codigo_corregido"),
+                    explicacion_ia=error.get("explicacion_ia"),
+                )
+                guardados += 1
+
+            except Exception as exc:
+                logger.warning("⚠️ Error guardando error (idx=%d): %s", idx, exc)
+                saltados += 1
+
+        logger.info(
+            "📊 Errores — Guardados: %d | Saltados: %d | Total: %d",
+            guardados, saltados, len(errores),
+        )
+
+    async def _guardar_recomendaciones(
+        self,
+        evaluacion_id: int,
+        recomendaciones: list[dict],
+    ) -> None:
+        """Guarda las recomendaciones."""
+        if not recomendaciones:
+            return
+
+        guardados = 0
+
+        for idx, rec in enumerate(recomendaciones):
+            try:
+                categoria_slug = rec.get("categoria_slug", "")
+                categoria_id = None
+                if categoria_slug:
+                    categoria_id = await evaluaciones_repo.get_categoria_error_id(
+                        db=self.db, slug=categoria_slug,
+                    )
+
+                await evaluaciones_repo.guardar_recomendacion(
+                    db=self.db,
+                    evaluacion_id=evaluacion_id,
+                    tipo=rec.get("tipo", "concepto"),
+                    titulo=rec.get("titulo", rec.get("mensaje", "Recomendación")),
+                    descripcion=rec.get("descripcion", rec.get("solucion", "")),
+                    codigo_ejemplo=rec.get("codigo_ejemplo"),
+                    recurso_url=rec.get("recurso_url"),
+                    recurso_titulo=rec.get("recurso_titulo"),
+                    categoria_error_id=categoria_id,
+                    prioridad=rec.get("prioridad", "media"),
+                    orden=rec.get("orden", idx),
+                )
+                guardados += 1
+
+            except Exception as exc:
+                logger.warning("⚠️ Error guardando recomendación (idx=%d): %s", idx, exc)
+
+        logger.info("📊 Recomendaciones — Guardadas: %d/%d", guardados, len(recomendaciones))
+
+    async def _guardar_rubricas(
+        self,
+        evaluacion_id: int,
+        evaluacion_tecnica: dict,
+    ) -> None:
+        """
+        Guarda las rúbricas técnicas.
+        No propaga excepciones para no romper la transacción principal.
+        """
+        if not evaluacion_tecnica:
+            return
+
+        try:
+            await self.analytics.guardar_evaluacion_tecnica(
+                db=self.db,
+                evaluacion_id=evaluacion_id,
+                evaluacion_tecnica=evaluacion_tecnica,
+            )
+            logger.info("✅ Rúbricas guardadas para evaluacion_id=%s", evaluacion_id)
+        except Exception as exc:
+            logger.error(
+                "❌ Error en _guardar_rubricas (evaluacion_id=%s): %s",
+                evaluacion_id, exc, exc_info=True,
+            )
+            # No re-lanzar: las rúbricas son secundarias al flujo principal
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS DE CONSTRUCCIÓN DE RESPUESTA
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _construir_respuesta(resultado_llm: dict, pilares: dict) -> RespuestaAnalisisCodigo:
+    """Construye RespuestaAnalisisCodigo desde el resultado fresco del LLM."""
+    cal = resultado_llm.get("calificacion_general", {})
+
+    recomendaciones = sorted(
+        resultado_llm.get("recomendaciones", []),
+        key=lambda r: r.get("orden", 99),
+    )
+
+    return RespuestaAnalisisCodigo(
+        calificacion_general={
+            "nivel":                   cal.get("nivel", "Regular"),
+            "nivel_candidato":         cal.get("nivel_candidato"),
+            "puntaje":                 round(float(cal.get("puntaje") or 0), 1),
+            "apto_para_contratacion":  cal.get("apto_para_contratacion"),
+            "resumen":                 cal.get("resumen", ""),
+            "resumen_para_reclutador": cal.get("resumen_para_reclutador"),
+        },
+        pilares_tecnicos=pilares,
+        errores=resultado_llm.get("errores", []),
+        buenas_practicas=resultado_llm.get("buenas_practicas", []),
+        malas_practicas=resultado_llm.get("malas_practicas", []),
+        recomendaciones=recomendaciones,
+        evaluacion_tecnica=resultado_llm.get("evaluacion_tecnica", {}),
+        detalle_rubricas=[],
+    )
+
+
+def _construir_respuesta_desde_bd(sesion) -> RespuestaAnalisisCodigo:
+    """
+    Construye RespuestaAnalisisCodigo desde datos ya persistidos en BD.
+    Se usa en caso de doble submit para no re-evaluar.
+    """
+    evaluacion = sesion.evaluacion
+    puntaje    = float(evaluacion.puntaje_total) if evaluacion and evaluacion.puntaje_total else 0.0
+
+    def _nivel(p: float) -> str:
+        if p >= 90: return "Excelente"
+        if p >= 75: return "Bueno"
+        if p >= 60: return "Regular"
+        if p >= 40: return "Deficiente"
+        return "Crítico"
+
+    pilares = {
+        "javascript":       float(evaluacion.puntaje_javascript or 0),
+        "arquitectura":     float(evaluacion.puntaje_arquitectura or 0),
+        "buenas_practicas": float(evaluacion.puntaje_buenas_practicas or 0),
+        "comunicacion":     float(evaluacion.puntaje_comunicacion or 0),
+        "resolucion":       float(evaluacion.puntaje_resolucion or 0),
+    } if evaluacion else {}
+
+    errores = [
         {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
+            "tipo":             e.categoria_error.nombre if e.categoria_error else "general",
+            "categoria_slug":   e.categoria_error.slug if e.categoria_error else None,
+            "descripcion":      e.descripcion,
+            "impacto":          e.severidad,
+            "es_conceptual":    e.es_error_conceptual,
+            "linea_aproximada": e.linea_codigo,
+            "fragmento_codigo": e.fragmento_codigo,
+            "codigo_corregido": e.codigo_corregido,
+            "explicacion_ia":   e.explicacion_ia,
         }
-      );
+        for e in (sesion.errores_detectados or [])
+    ]
 
-      if (!sesionResponse.ok) {
-        const errorText = await sesionResponse.text();
-        console.error('❌ Error creando sesión:', sesionResponse.status, errorText);
-        throw new Error(`Error creando sesión: ${sesionResponse.status}`);
-      }
+    recomendaciones = []
+    if evaluacion and evaluacion.recomendaciones:
+        recomendaciones = sorted(
+            [
+                {
+                    "tipo":           r.tipo,
+                    "mensaje":        r.titulo,
+                    "solucion":       r.descripcion,
+                    "codigo_ejemplo": r.codigo_ejemplo,
+                    "recurso_url":    r.recurso_url,
+                    "recurso_titulo": r.recurso_titulo,
+                    "prioridad":      r.prioridad,
+                    "orden":          r.orden,
+                }
+                for r in evaluacion.recomendaciones
+            ],
+            key=lambda x: x["orden"],
+        )
 
-      const data = await sesionResponse.json();
-      const sesionId = data.sesion_id;
+    fortalezas   = [f.strip() for f in (evaluacion.fortalezas or "").split("\n") if f.strip()]
+    areas_mejora = [a.strip() for a in (evaluacion.areas_mejora or "").split("\n") if a.strip()]
 
-      console.log('✅ Sesión creada rápidamente:', sesionId);
+    return RespuestaAnalisisCodigo(
+        calificacion_general={
+            "nivel":                   _nivel(puntaje),
+            "nivel_candidato":         evaluacion.nivel_candidato if evaluacion else None,
+            "puntaje":                 int(puntaje),
+            "apto_para_contratacion":  evaluacion.apto_para_contratacion if evaluacion else None,
+            "resumen":                 evaluacion.feedback_general if evaluacion else "Sin evaluación",
+            "resumen_para_reclutador": evaluacion.resumen_para_reclutador if evaluacion else None,
+        },
+        pilares_tecnicos=pilares,
+        errores=errores,
+        buenas_practicas=fortalezas,
+        malas_practicas=areas_mejora,
+        recomendaciones=recomendaciones,
+        detalle_rubricas=[],
+    )
 
-      // Guardar en sessionStorage por si acaso
-      if (sesionId) {
-        sessionStorage.setItem('sesion_id', sesionId);
-      }
 
-      // ✅ PASO 2: Redirigir al IDE INMEDIATAMENTE con el sesion_id
-      const ideBase = process.env.NEXT_PUBLIC_IDE_URL || 'http://localhost:3001';
 
-      const params = new URLSearchParams({
-        framework,
-        usuario_id: user.id,
-        token: accessToken,
-        sesion_id: sesionId,
-        mode: 'interview',
-      });
 
-      const finalUrl = `${ideBase}?${params.toString()}`;
 
-      console.log('🟢 Redirigiendo al IDE:', finalUrl);
-      ideWindow.location.href = finalUrl;
-    } catch (error) {
-      console.error('❌ Error al abrir IDE:', error);
+"""
+app/api/routes/evaluacion_codigo.py
 
-      // ✅ Fallback: modo libre si algo falla
-      const fallbackParams = new URLSearchParams({
-        framework,
-        usuario_id: user?.id || '',
-        token: localStorage.getItem('accessToken') || '',
-        mode: 'free',
-      });
+ARQUITECTURA DE SEGURIDAD:
+  - JWT solo en login y creación de sesión (asocia usuario_id ↔ sesion_id en BD)
+  - POST /finalizar  → público, usuario_id se resuelve desde sesion.usuario_id en BD
+  - GET  /resultado  → público, cualquiera con sesion_id puede ver (debug/admin)
+  - GET  /analisis   → público, cualquiera con sesion_id puede ver (frontend)
 
-      const ideBase = process.env.NEXT_PUBLIC_IDE_URL || 'http://localhost:3001';
-      const fallbackUrl = `${ideBase}?${fallbackParams.toString()}`;
+  El control de acceso real está en la BD: la sesión YA tiene usuario_id
+  desde el momento en que se creó con JWT. No hace falta re-validar aquí.
+"""
 
-      console.warn('⚠️ Redirigiendo a modo libre (fallback):', fallbackUrl);
-      ideWindow.location.href = fallbackUrl;
-    } finally {
-      setLoading(false);
-    }
-  };
+import logging
+from uuid import UUID
+from typing import Optional
 
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
-      <nav className="bg-gray-900/90 backdrop-blur-sm border-b border-gray-800 px-6 py-4 z-50">
-        <div className="flex items-center justify-between max-w-7xl mx-auto w-full">
-          <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold text-[#00ff00]">DEV_STREAM</h1>
-            <span className="text-gray-500">|</span>
-            <span className="text-gray-400">Prueba de Código</span>
-          </div>
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-          <div className="flex items-center space-x-4">
-            <div className="text-sm text-gray-400">{user?.email}</div>
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-sm font-medium transition-colors"
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={handleLogout}
-              disabled={isLoggingOut}
-              className="bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
+from app.api.deps import get_db
+from app.core.config import settings
+from app.core.normalizers import construir_contexto_proyecto
+from app.schemas.evaluaciones import (
+    RespuestaAnalisisCodigo,
+    SolicitudFinalizarCodigo,
+)
+from app.services.evaluacion.codigo_service import CodigoService
+from app.db.repositories import sesiones_repo
 
-      <div className="flex-1 overflow-hidden flex flex-col items-center justify-center bg-gray-900 p-6 text-center">
-        <div className="max-w-4xl w-full">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-800 border border-gray-700 text-xs uppercase tracking-widest text-gray-400 mb-4">
-            Modo Prueba Activo
-          </div>
-          <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">
-            Elige tu entorno de prueba
-          </h2>
-          <p className="text-gray-400 text-base md:text-lg">
-            Inicia el editor en una nueva ventana y resuelve los retos con el stack que prefieras.
-            Tu avance se guarda automáticamente y puedes volver cuando quieras.
-          </p>
+logger = logging.getLogger(__name__)
 
-          <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button
-              onClick={() => handleOpenIDE('vuejs')}
-              disabled={isLoadingVue || isLoadingNext}
-              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              {isLoadingVue ? '⏳ Iniciando...' : '▶ Prueba con Vue.js'}
-            </button>
-            <button
-              onClick={() => handleOpenIDE('nextjs')}
-              disabled={isLoadingVue || isLoadingNext}
-              className="bg-[#00ff00] hover:bg-[#00dd00] text-black px-8 py-4 rounded-lg text-lg font-bold transition-all shadow-lg hover:shadow-[0_0_30px_rgba(0,255,0,0.4)] transform hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
-            >
-              {isLoadingNext ? '⏳ Iniciando...' : '▶ Prueba con Next.js'}
-            </button>
-          </div>
+router = APIRouter(prefix="/codigo", tags=["Evaluación de Código"])
 
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
-            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Duración estimada</p>
-              <p className="text-lg text-white font-semibold">30 a 45 min</p>
-            </div>
-            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Nivel sugerido</p>
-              <p className="text-lg text-white font-semibold">Intermedio / Avanzado</p>
-            </div>
-            <div className="bg-gray-950 border border-gray-800 rounded-lg p-4">
-              <p className="text-sm text-gray-500">Formato</p>
-              <p className="text-lg text-white font-semibold">Editor en vivo</p>
-            </div>
-          </div>
-
-          <p className="text-gray-500 mt-5 text-sm">
-            Se abrirá el editor de código en una nueva ventana
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+# Mapeo slug URL → nombre canónico
+FRAMEWORK_MAP: dict[str, str] = {
+    "vue":        "Vue.js",
+    "vuejs":      "Vue.js",
+    "next":       "Next.js",
+    "nextjs":     "Next.js",
+    "react":      "React",
+    "typescript": "TypeScript",
+    "javascript": "JavaScript",
+    "css":        "CSS",
+    "nodejs":     "Node.js",
+    "node":       "Node.js",
 }
 
-editor_codigo/service/questionservice.ts:
-// services/questionService.ts
 
-export interface QuestionData {
-  sesion_id: string | null;
-  framework: string;
-  nivel_dificultad: string;
-  pregunta_practica: string;
-  contexto_adicional: string | null;
-  criterios_evaluacion: string[];
-  conceptos_clave: string[];
-  tiempo_estimado_minutos: number;
-  fue_adaptativa: boolean;
-  categorias_error_objetivo: string[];
+def _normalizar_framework(framework_raw: str) -> str:
+    """Normaliza el nombre del framework con logs de depuración."""
+    original = framework_raw
+    normalized = FRAMEWORK_MAP.get(framework_raw.strip().lower(), framework_raw.strip())
+    if original != normalized:
+        logger.debug("Framework normalizado: '%s' → '%s'", original, normalized)
+    return normalized
+
+
+def _puntaje_a_nivel_texto(puntaje: float) -> str:
+    """Convierte puntaje numérico a nivel textual."""
+    if puntaje >= 90: return "Excelente"
+    if puntaje >= 75: return "Bueno"
+    if puntaje >= 60: return "Regular"
+    if puntaje >= 40: return "Deficiente"
+    return "Crítico"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS INTERNOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _log_request_details(request: Request, data: SolicitudFinalizarCodigo) -> None:
+    """Registra detalles de la request para debugging."""
+    logger.info("=" * 60)
+    logger.info("📨 NUEVA SOLICITUD A /codigo/finalizar")
+    logger.info("🌐 IP Cliente: %s", request.client.host if request.client else "Unknown")
+    logger.info("🔧 Framework recibido: '%s'", data.lenguaje)
+    logger.info("🔄 Framework normalizado: '%s'", _normalizar_framework(data.lenguaje))
+    logger.info("🆔 Sesion ID: %s", data.sesion_id)
+    logger.info("📝 Longitud código: %d caracteres", len(data.codigo))
+    logger.info("📁 Archivo activo: %s", data.active_file or "Ninguno")
+    logger.info("📂 Archivos adjuntos: %d", len(data.files) if data.files else 0)
+    logger.info("🏁 Motivo cierre: %s", data.motivo_cierre)
+    if data.files:
+        file_list = list(data.files.keys())[:5]
+        logger.info("📄 Archivos: %s", ", ".join(file_list))
+        if len(data.files) > 5:
+            logger.info("   ... y %d más", len(data.files) - 5)
+    logger.info("-" * 60)
+
+
+def _parse_uuid(value: str) -> UUID:
+    """Valida y convierte string a UUID con log de error."""
+    try:
+        return UUID(value)
+    except ValueError:
+        logger.error("❌ UUID inválido recibido: %s", value)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "UUID_INVÁLIDO",
+                "message": "sesion_id debe ser un UUID válido.",
+                "received": value,
+            },
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /codigo/finalizar  ← SIN JWT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/finalizar",
+    response_model=RespuestaAnalisisCodigo,
+    summary="Finaliza la sesión: guarda el código, evalúa con IA y persiste todo",
+    status_code=status.HTTP_200_OK,
+)
+async def finalizar_codigo(
+    data: SolicitudFinalizarCodigo,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Endpoint único de cierre de sesión. Se invoca cuando:
+    - El candidato presiona "Enviar solución", o
+    - El frontend detecta que el tiempo se agotó.
+
+    No requiere JWT. El usuario_id se obtiene de sesion.usuario_id en BD,
+    garantizando que la evaluación siempre queda asociada al dueño correcto.
+
+    Flujo interno:
+      1. Valida longitud del código
+      2. Construye contexto multi-archivo del IDE
+      3. RAG recupera fragmentos de buenas prácticas
+      4. LLM evalúa el código y retorna los 5 pilares técnicos
+      5. Persiste código, evaluación, errores y recomendaciones en BD
+      6. Actualiza perfil técnico del usuario (desde sesion.usuario_id)
+      7. Marca la sesión como completada (o tiempo_agotado)
+
+    Raises:
+        HTTPException 413: Si el código excede el tamaño máximo
+        HTTPException 404: Si la sesión no existe
+        HTTPException 429: Si el LLM está saturado
+    """
+    await _log_request_details(request, data)
+
+    # ── Validación 1: Longitud del código ──────────────────────────────────
+    if len(data.codigo) > settings.MAX_CODIGO_LENGTH:
+        logger.error("❌ Código excede límite: %d > %d", len(data.codigo), settings.MAX_CODIGO_LENGTH)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "error": "CÓDIGO_DEMASIADO_LARGO",
+                "message": f"El código excede el límite máximo de {settings.MAX_CODIGO_LENGTH} caracteres.",
+                "max_length": settings.MAX_CODIGO_LENGTH,
+                "current_length": len(data.codigo),
+            },
+        )
+
+    # ── Validación 2: Formato de sesion_id ─────────────────────────────────
+    try:
+        sesion_uuid = UUID(data.sesion_id)
+        logger.debug("✅ Sesion ID válido: %s", sesion_uuid)
+    except ValueError:
+        logger.error("❌ Sesion ID inválido: %s", data.sesion_id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "UUID_INVÁLIDO",
+                "message": "El sesion_id debe ser un UUID válido.",
+                "received": data.sesion_id,
+            },
+        )
+
+    # ── Validación 3: Código no vacío ──────────────────────────────────────
+    if not data.codigo or not data.codigo.strip():
+        logger.error("❌ Código vacío recibido")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "CÓDIGO_VACÍO",
+                "message": "El campo 'codigo' no puede estar vacío.",
+            },
+        )
+
+    # ── Procesamiento principal ─────────────────────────────────────────────
+    try:
+        framework = _normalizar_framework(data.lenguaje)
+        logger.info("🔧 Framework procesado: %s", framework)
+
+        logger.debug("📁 Construyendo contexto del proyecto...")
+        contexto_proyecto = construir_contexto_proyecto(
+            active_file=data.active_file or "",
+            files=data.files or {},
+            framework=framework,
+        )
+        logger.debug("✅ Contexto construido: %d caracteres", len(contexto_proyecto))
+
+        logger.info("🚀 Iniciando pipeline de evaluación...")
+        service = CodigoService(db=db, request=request)
+
+        resultado = await service.finalizar_y_evaluar(
+            sesion_id=data.sesion_id,
+            codigo=data.codigo,
+            framework=framework,
+            contexto_proyecto=contexto_proyecto,
+            motivo_cierre=data.motivo_cierre,
+            usuario_id=None,
+            files=data.files,
+        )
+
+        logger.info("✅ Evaluación completada exitosamente")
+
+        # ✅ CORRECTO: resultado.calificacion_general es un dict (construido así
+        # en _construir_respuesta), por lo que se accede con .get() o indexing.
+        # Si el schema Pydantic lo expone como dict, usamos .get(); si es un
+        # modelo anidado, usamos acceso de atributo. Aquí usamos la forma
+        # segura que funciona en ambos casos.
+        cal = resultado.calificacion_general
+        if isinstance(cal, dict):
+            logger.info("📊 Resultado - Puntaje: %s", cal.get("puntaje", "N/A"))
+            logger.info("📊 Resultado - Nivel: %s", cal.get("nivel", "N/A"))
+        else:
+            # cal es un objeto Pydantic con atributos
+            logger.info("📊 Resultado - Puntaje: %s", getattr(cal, "puntaje", "N/A"))
+            logger.info("📊 Resultado - Nivel: %s", getattr(cal, "nivel", "N/A"))
+
+        return resultado
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("=" * 60)
+        logger.error("❌ ERROR INESPERADO EN /codigo/finalizar")
+        logger.error("Tipo: %s", type(e).__name__)
+        logger.error("Mensaje: %s", str(e))
+        logger.error("Stack trace:", exc_info=True)
+        logger.error("=" * 60)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "ERROR_INTERNO",
+                "message": "Ocurrió un error interno al procesar la evaluación.",
+                "type": type(e).__name__,
+            },
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /codigo/sesion/{sesion_id}/resultado  ← SIN JWT (debug/admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/sesion/{sesion_id}/resultado",
+    summary="Resultado crudo de una sesión (formato ORM, para admin/debug)",
+)
+async def obtener_resultado_sesion(
+    sesion_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna los datos crudos de BD.
+    Público: cualquiera con el sesion_id puede consultar.
+    Usar solo para debug y panel de administración.
+    El frontend debe usar GET /codigo/sesion/{id}/analisis en su lugar.
+    """
+    logger.info("📊 Solicitando resultado crudo para sesión: %s", sesion_id)
+
+    sesion_uuid = _parse_uuid(sesion_id)
+    sesion = await sesiones_repo.get_sesion_con_detalles(db, sesion_uuid)
+
+    if not sesion:
+        logger.warning("⚠️ Sesión no encontrada: %s", sesion_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "SESIÓN_NO_ENCONTRADA",
+                "message": f"No se encontró la sesión con ID: {sesion_id}",
+            },
+        )
+
+    logger.info("✅ Sesión encontrada - Estado: %s", sesion.estado)
+    if sesion.evaluacion:
+        logger.info(
+            "   Evaluación ID: %s - Puntaje: %s",
+            sesion.evaluacion.id,
+            sesion.evaluacion.puntaje_total,
+        )
+
+    return sesion
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /codigo/sesion/{sesion_id}/analisis  ← SIN JWT (frontend)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/sesion/{sesion_id}/analisis",
+    response_model=RespuestaAnalisisCodigo,
+    summary="Análisis formateado para el frontend",
+)
+async def obtener_analisis_sesion(
+    sesion_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Transforma los datos de BD al contrato estable RespuestaAnalisisCodigo.
+    Este es el endpoint que DEBE usar el frontend para mostrar resultados.
+
+    Público: el sesion_id actúa como token de acceso opaco (UUID v4).
+    El usuario_id ya está grabado en la sesión desde la creación con JWT.
+
+    Incluye los 5 pilares técnicos:
+      - puntaje_javascript
+      - puntaje_arquitectura
+      - puntaje_buenas_practicas
+      - puntaje_comunicacion
+      - puntaje_resolucion
+    """
+    logger.info("📊 Solicitando análisis formateado para sesión: %s", sesion_id)
+
+    sesion_uuid = _parse_uuid(sesion_id)
+    sesion = await sesiones_repo.get_sesion_con_detalles(db, sesion_uuid)
+
+    if not sesion:
+        logger.warning("⚠️ Sesión no encontrada para análisis: %s", sesion_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "SESIÓN_NO_ENCONTRADA",
+                "message": f"No se encontró la sesión con ID: {sesion_id}",
+            },
+        )
+
+    evaluacion = sesion.evaluacion
+    puntaje = float(evaluacion.puntaje_total) if evaluacion and evaluacion.puntaje_total else 0.0
+
+    logger.info("✅ Sesión encontrada - Puntaje: %.2f - Estado: %s", puntaje, sesion.estado)
+
+    errores = [
+        {
+            "tipo":             e.categoria_error.nombre if e.categoria_error else "general",
+            "categoria_slug":   e.categoria_error.slug if e.categoria_error else None,
+            "descripcion":      e.descripcion,
+            "impacto":          e.severidad,
+            "es_conceptual":    e.es_error_conceptual,
+            "linea_aproximada": e.linea_codigo,
+            "fragmento_codigo": e.fragmento_codigo,
+            "codigo_corregido": e.codigo_corregido,
+            "explicacion_ia":   e.explicacion_ia,
+        }
+        for e in (sesion.errores_detectados or [])
+    ]
+    logger.info("🐛 Errores encontrados: %d", len(errores))
+
+    recomendaciones = []
+    if evaluacion and evaluacion.recomendaciones:
+        recomendaciones = sorted(
+            [
+                {
+                    "tipo":           r.tipo,
+                    "titulo":        r.titulo,
+                    "descripcion":   r.descripcion,
+                    "codigo_ejemplo": r.codigo_ejemplo,
+                    "recurso_url":    r.recurso_url,
+                    "recurso_titulo": r.recurso_titulo,
+                    "prioridad":      r.prioridad,
+                    "orden":          r.orden,
+                }
+                for r in evaluacion.recomendaciones
+            ],
+            key=lambda x: x["orden"],
+        )
+        logger.info("📚 Recomendaciones: %d", len(recomendaciones))
+
+    fortalezas   = [f.strip() for f in (evaluacion.fortalezas or "").split("\n") if f.strip()]
+    areas_mejora = [a.strip() for a in (evaluacion.areas_mejora or "").split("\n") if a.strip()]
+    logger.info("💪 Fortalezas: %d - Áreas de mejora: %d", len(fortalezas), len(areas_mejora))
+
+    pilares = {
+        "javascript":       float(evaluacion.puntaje_javascript or 0),
+        "arquitectura":     float(evaluacion.puntaje_arquitectura or 0),
+        "buenas_practicas": float(evaluacion.puntaje_buenas_practicas or 0),
+        "comunicacion":     float(evaluacion.puntaje_comunicacion or 0),
+        "resolucion":       float(evaluacion.puntaje_resolucion or 0),
+    } if evaluacion else {}
+    logger.info("📊 Pilares: %s", pilares)
+
+    detalle_rubricas = []
+    if evaluacion and evaluacion.detalles:
+        detalle_rubricas = [
+            {
+                "rubrica":    d.rubrica.nombre if d.rubrica else "Desconocida",
+                "puntaje":    float(d.puntaje),
+                "comentario": d.comentario,
+            }
+            for d in evaluacion.detalles
+        ]
+        logger.info("📋 Rúbricas detalladas: %d", len(detalle_rubricas))
+
+    response = RespuestaAnalisisCodigo(
+        calificacion_general={
+            "nivel":                   _puntaje_a_nivel_texto(puntaje),
+            "nivel_candidato":         evaluacion.nivel_candidato if evaluacion else None,
+            "puntaje":                 int(puntaje),
+            "apto_para_contratacion":  evaluacion.apto_para_contratacion if evaluacion else None,
+            "resumen":                 evaluacion.feedback_general if evaluacion else "Sin evaluación",
+            "resumen_para_reclutador": evaluacion.resumen_para_reclutador if evaluacion else None,
+        },
+        pilares_tecnicos=pilares,
+        errores=errores,
+        buenas_practicas=fortalezas,
+        malas_practicas=areas_mejora,
+        recomendaciones=recomendaciones,
+        detalle_rubricas=detalle_rubricas,
+    )
+
+    logger.info("✅ Análisis formateado exitosamente")
+    return response
+
+
+
+
+dame mis codigos completos con estas mejoras profesionales: 
+¡Excelente análisis! Has identificado correctamente el problema y los archivos clave. Sin embargo, después de revisar tu código completo, he encontrado que **ya tienes implementadas muchas de las soluciones**, pero hay **fallos críticos en la propagación del framework** y en la **construcción del prompt**.
+
+Aquí está el diagnóstico completo y las correcciones necesarias:
+
+---
+
+## 🔍 DIAGNÓSTICO: ¿Por qué tu RAG analiza Vue como Next.js?
+
+### ❌ Problema 1: El framework NO se usa para filtrar en RAG
+
+En `app/services/rag/rag_service.py`:
+
+```python
+# Línea 106
+query = f"buenas prácticas {framework} code review patrones arquitectura"
+contexto_rag = await self.recuperar_contexto(query=query, framework=framework)
+```
+
+**✅ Esto está BIEN** — le pasas `framework` al método `recuperar_contexto`.
+
+**Pero...** en `recuperar_contexto` (línea 52-53), llamas a `retriever.buscar()` con `framework`. **Si el retriever no está usando ese parámetro para filtrar en OpenSearch, devolverá resultados genéricos (Next.js).**
+
+### ❌ Problema 2: El System Prompt es DINÁMICO pero NO específico para Vue
+
+En `app/services/llm/prompts/evaluacion_prompts.py`, línea 55:
+
+```python
+_SYSTEM = """\
+Eres un revisor de código senior especializado en {framework}.
+```
+
+**✅ Esto está BIEN** — el framework se inyecta.
+
+**PERO...** mira las categorías de errores (línea 57-58):
+
+```python
+REGLAS:
+1. Usa slugs: consumo_apis, manejo_estado, async_await, componentes_props, css_layout, typescript_tipos, inmutabilidad, optimizacion_renders, arquitectura_general
+```
+
+**❌ PROBLEMA:** `async_await`, `typescript_tipos`, `optimizacion_renders` son **conceptos universales** que no distinguen entre Vue y Next.js. El LLM recibe contexto RAG de Next.js (porque el RAG devolvió eso) y luego el prompt no le dice explícitamente "evalúa bajo la óptica de Vue".
+
+### ❌ Problema 3: El contexto RAG contaminado
+
+Si tu retriever en OpenSearch no filtra por `framework` al buscar, devolverá los fragmentos más relevantes semánticamente. Como tienes más contenido de Next.js indexado o mejor estructurado, **eso contamina todo el análisis**.
+
+---
+
+## ✅ SOLUCIÓN COMPLETA (Archivos a modificar)
+
+### 📁 1. **app/services/rag/rag_service.py** — Usar el framework en la búsqueda
+
+**Ya está hecho**, pero verifica que el retriever realmente use el filtro. Si no, corrige el retriever:
+
+```python
+# Busca en tu archivo del retriever (vector_store.py o similar)
+async def buscar(self, query: str, framework: Optional[str] = None, top_k: int = 5) -> str:
+    # DEBE filtrar por metadata.framework == framework
+    if framework:
+        # Ejemplo con OpenSearch:
+        query_body = {
+            "size": top_k,
+            "query": {
+                "bool": {
+                    "must": [{"match": {"text": query}}],
+                    "filter": [{"term": {"metadata.framework.keyword": framework}}]  # ✅ FILTRO OBLIGATORIO
+                }
+            }
+        }
+    # ...
+```
+
+### 📁 2. **app/services/llm/prompts/evaluacion_prompts.py** — Hacer el prompt más específico
+
+Agrega instrucciones explícitas sobre el framework:
+
+```python
+def build_code_analysis_prompt(...):
+    # ...
+    
+    # 🔥 NUEVO: Instrucción explícita sobre el framework
+    instruccion_framework = f"""
+    ⚠️ IMPORTANTE: El código a evaluar está escrito en {framework}. 
+    NO EVALÚES el código como si fuera Next.js, React, u otro framework.
+    Enfócate en las mejores prácticas, patrones y características específicas de {framework}.
+    """
+    
+    # Modifica el system prompt para incluir esta instrucción
+    system = f"""Eres un revisor de código senior especializado en {framework}.
+
+{instruccion_framework}
+
+REGLAS:
+1. Usa slugs: consumo_apis, manejo_estado, async_await, componentes_props, css_layout, typescript_tipos, inmutabilidad, optimizacion_renders, arquitectura_general
+2. Clasifica error por impacto: critico|alto|medio|bajo
+3. Clasifica candidato: descartado|revisar|promisorio|recomendado|destacado
+4. Responde SOLO con JSON válido, sin markdown.
+...
+"""
+```
+
+**O mejor:** Modifica el `_SYSTEM` para que sea dinámico con instrucciones específicas por framework:
+
+```python
+_INSTRUCCIONES_ESPECIFICAS = {
+    "Vue.js": "Evalúa específicamente: uso de Composition API, reactividad con ref/reactive, ciclo de vida (onMounted, onUnmounted), manejo de props y emits, slots, directivas (v-if, v-for), y Vue Router.",
+    "React": "Evalúa específicamente: uso de hooks (useState, useEffect, useMemo), manejo de estado con Context o Redux, optimización con memo/useCallback, componentes funcionales, y React Router.",
+    "Next.js": "Evalúa específicamente: Server Components vs Client Components, uso de App Router, Server Actions, ISR/SSG/SSR, y optimización de Core Web Vitals.",
+    # Agrega más frameworks...
 }
+```
 
-// Mapeo de slug de URL → slug de API
-const FRAMEWORK_API_MAP: Record<string, string> = {
-  vuejs: "vue",
-  vue: "vue",
-  nextjs: "next",
-  next: "next",
-  react: "react",
-  typescript: "typescript",
-  javascript: "javascript",
-};
+### 📁 3. **app/services/evaluacion/codigo_service.py** — Log para depuración
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+Agrega logs para verificar qué framework llega:
 
-class QuestionService {
-  private cache = new Map<string, QuestionData>();
+```python
+async def finalizar_y_evaluar(...):
+    # ...
+    logger.info("=" * 80)
+    logger.info(f"🔧 Framework recibido en codigo_service: {framework}")  # 🔥 VERIFICACIÓN
+    logger.info("=" * 80)
+    
+    # ...
+```
 
-  async getByFramework(framework: string): Promise<QuestionData> {
-    const cached = this.cache.get(framework);
-    if (cached) return cached;
+### 📁 4. **app/api/routes/evaluacion_codigo.py** — Verificar el normalizador
 
-    const apiSlug = FRAMEWORK_API_MAP[framework] ?? framework;
-    const url = `${API_BASE}/preguntas/generar/${apiSlug}`;
+Tu `_normalizar_framework` está bien, pero verifica que no esté convirtiendo "vue" a "Vue.js" correctamente:
 
-    const response = await fetch(url);
+```python
+def _normalizar_framework(framework_raw: str) -> str:
+    """Normaliza el nombre del framework con logs de depuración."""
+    original = framework_raw
+    normalized = FRAMEWORK_MAP.get(framework_raw.strip().lower(), framework_raw.strip())
+    if original != normalized:
+        logger.debug("Framework normalizado: '%s' → '%s'", original, normalized)
+    return normalized
+```
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => response.statusText);
-      throw new Error(`Error ${response.status}: ${detail}`);
-    }
+El mapeo está bien:
 
-    const raw = await response.json();
-
-    // Mapeo defensivo: los campos del backend → QuestionData
-    // Bug 1 corregido: el backend puede devolver tiempo_estimado_min (del service)
-    // o tiempo_estimado_minutos (del schema). Cubrimos ambos.
-    const data: QuestionData = {
-      sesion_id: raw.sesion_id ?? null,
-      framework: raw.framework ?? framework,
-      nivel_dificultad: raw.nivel_dificultad ?? raw.nivel ?? "Junior",
-      pregunta_practica: raw.pregunta_practica ?? "",
-      contexto_adicional: raw.contexto_adicional ?? null,
-      criterios_evaluacion: Array.isArray(raw.criterios_evaluacion)
-        ? raw.criterios_evaluacion
-        : [],
-      conceptos_clave: Array.isArray(raw.conceptos_clave)
-        ? raw.conceptos_clave
-        : [],
-      tiempo_estimado_minutos:
-        raw.tiempo_estimado_minutos ??
-        raw.tiempo_estimado_min ??
-        30,
-      fue_adaptativa: raw.fue_adaptativa ?? false,
-      categorias_error_objetivo: Array.isArray(raw.categorias_error_objetivo)
-        ? raw.categorias_error_objetivo
-        : [],
-    };
-
-    this.cache.set(framework, data);
-    return data;
-  }
-
-  clearCache(framework: string): void {
-    this.cache.delete(framework);
-  }
-
-  clearAll(): void {
-    this.cache.clear();
-  }
+```python
+FRAMEWORK_MAP: dict[str, str] = {
+    "vue":        "Vue.js",
+    "vuejs":      "Vue.js",
+    "next":       "Next.js",
+    "nextjs":     "Next.js",
+    "react":      "React",
+    # ...
 }
+```
 
-const questionService = new QuestionService();
-export default questionService;
+---
 
+## 🧪 PRUEBA DE VERIFICACIÓN
 
+Después de aplicar los cambios, prueba con estos pasos:
 
+1. **Enviar código Vue** desde el frontend con `lenguaje: "vue"`
+2. **Verifica en logs** que el framework llegue como "Vue.js"
+3. **Verifica en logs** que el RAG use "Vue.js" en la query
+4. **Revisa el prompt** que se construye — debe incluir "Vue.js" en el system prompt
+5. **Analiza la respuesta**: el LLM debe hablar de Composition API, `ref`, `reactive`, `v-for`, etc.
 
-si tengo este codigo en mis dos fronteds que tengo qdime si este es el me genera el eror  
+---
+
+## 📋 RESUMEN DE ARCHIVOS A MODIFICAR
+
+| Archivo | Cambio necesario |
+|---------|------------------|
+| `app/services/rag/rag_service.py` | Verificar que `framework` se use como filtro en `recuperar_contexto` |
+| `app/services/llm/prompts/evaluacion_prompts.py` | Agregar instrucciones específicas por framework al `_SYSTEM` |
+| `app/services/evaluacion/codigo_service.py` | Agregar logs de verificación de framework |
+| `app/api/routes/evaluacion_codigo.py` | Ya está bien, solo verificar normalización |
+| **VectorStore/Retriever** | Asegurar que `framework` se use como filtro en la búsqueda de OpenSearch |
+
+---

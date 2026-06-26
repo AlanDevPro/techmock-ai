@@ -1,4 +1,4 @@
-// controllers/usuario.controller.js
+// 📁 controllers/usuario.controller.js
 import { UsuarioModel } from "../models/usuario.model.js";
 import { db } from "../config/database.js";
 
@@ -9,18 +9,27 @@ export const getMiPerfil = async (req, res, next) => {
     if (!usuario) {
       return res.status(404).json({ success: false, error: "Usuario no encontrado" });
     }
-    // Ya no hay campos sensibles (password_hash, firebase_uid) en la tabla usuarios
-    // Se retorna el usuario directamente
     res.json({ success: true, data: usuario });
   } catch (error) {
     next(error);
   }
 };
 
-// PATCH /api/v1/usuarios/perfil
+// PATCH /api/v1/usuarios/perfil - VERSIÓN COMPLETA CON NUEVOS CAMPOS
 export const updateMiPerfil = async (req, res, next) => {
   try {
-    const { nombre, apellido, github_url, linkedin_url, telefono, avatar_url } = req.body;
+    const { 
+      nombre, 
+      apellido, 
+      github_url, 
+      linkedin_url, 
+      telefono, 
+      avatar_url,
+      bio,
+      website,
+      location,
+      twitter
+    } = req.body;
     
     const actualizado = await UsuarioModel.updatePerfil(req.usuario.id, {
       nombre, 
@@ -29,6 +38,10 @@ export const updateMiPerfil = async (req, res, next) => {
       linkedin_url, 
       telefono, 
       avatar_url,
+      bio,
+      website,
+      location,
+      twitter
     });
     
     if (!actualizado) {

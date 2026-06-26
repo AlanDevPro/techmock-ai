@@ -1,4 +1,4 @@
-// controllers/admin.controller.js
+// 📁 controllers/admin.controller.js
 import { UsuarioModel } from "../models/usuario.model.js";
 import { SesionEntrevistaModel } from "../models/sesionEntrevista.model.js";
 import { EstadisticasUsuarioModel } from "../models/estadisticasUsuario.model.js";
@@ -63,8 +63,8 @@ export const contactarDeveloper = async (req, res, next) => {
     }
 
     const contacto = await ContactoReclutamientoModel.create({
-      adminId:          req.usuario.id,
-      developerId:      developer_id,
+      adminId:            req.usuario.id,
+      developerId:        developer_id,
       sesionEntrevistaId: sesion_entrevista_id ?? null,
       asunto,
       mensaje,
@@ -102,6 +102,8 @@ export const getEvaluacionesAnalytics = async (req, res, next) => {
 
     const data = await Promise.all(
       evaluaciones.map(async (ev) => {
+        // getByEvaluacion devuelve [] si la evaluación no tiene rúbricas
+        // registradas en detalle_evaluacion — nunca lanza, así que esto es seguro.
         const detalles = await DetalleEvaluacionModel.getByEvaluacion(ev.id);
         return {
           ...ev,

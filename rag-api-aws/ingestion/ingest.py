@@ -1,16 +1,10 @@
 """
 Pipeline de ingestion: indexa documentos en OpenSearch.
+Optimizado para entornos con restricciones de RAM (8GB).
 
-EJECUTAR UNA VEZ (o cuando cambien los docs):
+EJECUTAR:
   python ingestion/ingest.py --framework vue
-  python ingestion/ingest.py --framework next
   python ingestion/ingest.py --all
-
-FLUJO:
-  1. Lee archivos .md de ingestion/docs/
-  2. Divide en chunks (fragmentos)
-  3. Genera embeddings con BAAI/bge-base-en-v1.5
-  4. Indexa en OpenSearch con campo knn para búsqueda semántica
 """
 
 import asyncio
@@ -19,6 +13,7 @@ import re
 from pathlib import Path
 from opensearchpy import OpenSearch
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.services.rag.embeddings.service import get_embedding_service
@@ -46,8 +41,7 @@ def crear_indice(client: OpenSearch):
         "settings": {
             "index": {
                 "knn": True,
-                #"knn.algo_param.ef_search": 512,
-                "knn.algo_param.ef_search": 8,
+                "knn.algo_param.ef_search": 8,  # Mantener bajo para consumir menos memoria RAM
             }
         },
         "mappings": {
@@ -79,10 +73,8 @@ def crear_indice(client: OpenSearch):
 
 def chunk_markdown(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     """
-    Divide texto markdown en chunks con overlap.
-    Respeta límites de sección (## headers) cuando es posible.
+    Divide texto markdown en chunks cortos con overlap optimizado para RAM.
     """
-    # Dividir por secciones primero
     sections = re.split(r"\n(?=#{1,3} )", text)
     chunks   = []
 
@@ -91,7 +83,6 @@ def chunk_markdown(text: str, chunk_size: int = 500, overlap: int = 50) -> list[
             if section.strip():
                 chunks.append(section.strip())
         else:
-            # Dividir sección larga en sub-chunks
             words    = section.split()
             current  = []
             char_count = 0
@@ -102,7 +93,6 @@ def chunk_markdown(text: str, chunk_size: int = 500, overlap: int = 50) -> list[
 
                 if char_count >= chunk_size:
                     chunks.append(" ".join(current))
-                    # Overlap: mantener últimas N palabras
                     overlap_words = current[-overlap:] if overlap else []
                     current       = overlap_words
                     char_count    = sum(len(w) + 1 for w in overlap_words)
@@ -110,7 +100,7 @@ def chunk_markdown(text: str, chunk_size: int = 500, overlap: int = 50) -> list[
             if current:
                 chunks.append(" ".join(current))
 
-    return [c for c in chunks if len(c.strip()) > 50]  # Ignorar chunks muy cortos
+    return [c for c in chunks if len(c.strip()) > 50]
 
 
 def ingestar_framework(client: OpenSearch, framework_key: str):
@@ -123,21 +113,19 @@ def ingestar_framework(client: OpenSearch, framework_key: str):
 
     if not doc_path.exists():
         print(f"⚠️  Archivo no encontrado: {doc_path}")
-        print(f"   Crea el archivo con documentación de {framework_nombre}")
         return
 
     print(f"\n🔄 Ingestionando {framework_nombre} desde {doc_path.name}...")
 
-    # Leer y dividir en chunks
     texto  = doc_path.read_text(encoding="utf-8")
-    chunks = chunk_markdown(texto)
+    
+    # OPTIMIZACIÓN RAM: Forzamos CHUNK_SIZE a 500 y OVERLAP a 50
+    chunks = chunk_markdown(texto, chunk_size=500, overlap=50)
     print(f"   📄 {len(chunks)} chunks generados")
 
-    # Generar embeddings en batch (eficiente)
     print("   🧠 Generando embeddings...")
     vectors = embedding_service.embed_batch_sync(chunks)
 
-    # Indexar en OpenSearch
     print("   📤 Indexando en OpenSearch...")
     indexed = 0
 
@@ -149,7 +137,8 @@ def ingestar_framework(client: OpenSearch, framework_key: str):
             id=doc_id,
             body={
                 "content":   chunk,
-                "framework": framework_nombre,
+                # Almacenamos el framework en minúsculas para hacer match exacto con el 'term filter'
+                "framework": framework_nombre.lower(), 
                 "source":    doc_path.name,
                 "chunk_id":  doc_id,
                 "embedding": vector,
@@ -164,6 +153,8 @@ def main():
     parser = argparse.ArgumentParser(description="Pipeline de ingestion RAG")
     parser.add_argument("--framework", help="Framework a ingestar (vue/next/react/...)")
     parser.add_argument("--all",       action="store_true", help="Ingestar todos los frameworks")
+    # ── AGREGAMOS EL ARGUMENTO AQUÍ ────────────────────────────────────
+    parser.add_argument("--recreate",   action="store_true", help="Elimina el índice existente antes de crear uno nuevo")
     args = parser.parse_args()
 
     client = OpenSearch(
@@ -173,6 +164,12 @@ def main():
     )
 
     try:
+        # ── LÓGICA PARA BORRAR EL ÍNDICE SI SE PASA --recreate ─────────
+        if args.recreate:
+            if client.indices.exists(index=settings.OPENSEARCH_INDEX):
+                client.indices.delete(index=settings.OPENSEARCH_INDEX)
+                print(f"🗑️ Índice antiguo '{settings.OPENSEARCH_INDEX}' eliminado completamente.")
+        
         crear_indice(client)
 
         if args.all:

@@ -6,18 +6,15 @@ import rateLimit from "express-rate-limit";
  * 100 requests por IP cada 15 minutos
  */
 export const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100,
+  windowMs: 15 * 60 * 1000, 
+  max: 250, // 🚀 Incrementado de 100 a 250 para evitar bloqueos por carga concurrente de dashboards/rankings
   standardHeaders: true,
   legacyHeaders: false,
   message: {
     success: false,
     error: "Demasiadas solicitudes desde esta IP. Intenta nuevamente en 15 minutos.",
   },
-  keyGenerator: (req) => {
-    // Si el usuario está autenticado, limitar por usuario; si no, por IP
-    return req.usuario?.id?.toString() || req.ip;
-  },
+  keyGenerator: (req) => req.usuario?.id?.toString() || req.ip,
 });
 
 /**

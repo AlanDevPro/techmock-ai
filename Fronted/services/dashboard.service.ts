@@ -1,8 +1,7 @@
-// services/dashboard.service.ts
+// 📁 services/dashboard.service.ts
 
 import { ReactNode } from "react";
-
-import { apiFetch } from "@/services/api";
+import { apiService } from "@/services/api.service"; // Asegúrate de apuntar a la ruta correcta de tu api.service.ts
 
 // ─────────────────────────────────────────────
 // TIPOS
@@ -15,10 +14,7 @@ export interface DashboardStats {
   average_score: number;
 }
 
-export type SessionStatus =
-  | "completada"
-  | "en_progreso"
-  | "abandonada";
+export type SessionStatus = "completada" | "en_progreso" | "abandonada";
 
 export interface RecentSession {
   status: string;
@@ -55,11 +51,7 @@ export interface RecentContact {
 // TIPOS DE NOTIFICACIÓN
 // ─────────────────────────────────────────────
 
-export type NotificationType =
-  | "success"
-  | "error"
-  | "warning"
-  | "info";
+export type NotificationType = "success" | "error" | "warning" | "info";
 
 export interface RecentNotif {
   time: ReactNode;
@@ -72,80 +64,11 @@ export interface RecentNotif {
   fecha_creacion: string;
 }
 
-// ─────────────────────────────────────────────
-// ERROR TIPADO
-// ─────────────────────────────────────────────
-
-export class DashboardError extends Error {
-  constructor(
-    message: string,
-    public readonly code:
-      | "UNAUTHORIZED"
-      | "FORBIDDEN"
-      | "SERVER_ERROR"
-      | "NETWORK_ERROR"
-      | "UNKNOWN"
-  ) {
-    super(message);
-    this.name = "DashboardError";
-  }
-}
-
-// ─────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────
-
-async function safeFetch(
-  endpoint: string,
-  options?: RequestInit
-): Promise<Response> {
-  try {
-    return await apiFetch(endpoint, options);
-  } catch (err: unknown) {
-    const isNetwork =
-      err instanceof TypeError &&
-      (err.message.includes("fetch") ||
-        err.message.includes("network"));
-
-    throw new DashboardError(
-      isNetwork
-        ? "No se pudo conectar al servidor."
-        : "Error inesperado.",
-      isNetwork ? "NETWORK_ERROR" : "UNKNOWN"
-    );
-  }
-}
-
-async function handleResponse<T>(
-  res: Response
-): Promise<T> {
-  if (res.status === 401)
-    throw new DashboardError(
-      "Sesión expirada.",
-      "UNAUTHORIZED"
-    );
-
-  if (res.status === 403)
-    throw new DashboardError(
-      "Sin permisos.",
-      "FORBIDDEN"
-    );
-
-  if (!res.ok)
-    throw new DashboardError(
-      `Error del servidor (${res.status}).`,
-      "SERVER_ERROR"
-    );
-
-  const data = await res.json();
-
-  if (!data.success)
-    throw new DashboardError(
-      data.message ?? "Error del backend.",
-      "SERVER_ERROR"
-    );
-
-  return data as T;
+// Interfaces genéricas para envolver las respuestas estándar de tu backend
+interface BackendResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -153,72 +76,63 @@ async function handleResponse<T>(
 // ─────────────────────────────────────────────
 
 export const dashboardService = {
+  /**
+   * Obtiene las métricas generales del panel administrativo.
+   */
   async getStats(): Promise<DashboardStats> {
-    const res = await safeFetch("/dashboard/stats");
-
-    const data = await handleResponse<{
-      success: boolean;
-      data: DashboardStats;
-    }>(res);
-
-    return data.data;
+    try {
+      const response = await apiService.get<BackendResponse<DashboardStats>>("/dashboard/stats");
+      return response.data;
+    } catch (error: any) {
+      throw new Error(error.message || "Error al cargar las estadísticas del dashboard.");
+    }
   },
 
-  async getRecentSessions(): Promise<
-    RecentSession[]
-  > {
-    const res = await safeFetch(
-      "/dashboard/recent-sessions"
-    );
-
-    const data = await handleResponse<{
-      success: boolean;
-      data: RecentSession[];
-    }>(res);
-
-    return data.data;
+  /**
+   * Obtiene la lista de las últimas sesiones o simulaciones realizadas por los usuarios.
+   */
+  async getRecentSessions(): Promise<RecentSession[]> {
+    try {
+      const response = await apiService.get<BackendResponse<RecentSession[]>>("/dashboard/recent-sessions");
+      return response.data ?? [];
+    } catch (error: any) {
+      throw new Error(error.message || "Error al cargar las sesiones recientes.");
+    }
   },
 
+  /**
+   * Obtiene el top de tecnologías más utilizadas y sus promedios de puntaje.
+   */
   async getTopTechs(): Promise<TopTech[]> {
-    const res = await safeFetch(
-      "/dashboard/top-technologies"
-    );
-
-    const data = await handleResponse<{
-      success: boolean;
-      data: TopTech[];
-    }>(res);
-
-    return data.data;
+    try {
+      const response = await apiService.get<BackendResponse<TopTech[]>>("/dashboard/top-technologies");
+      return response.data ?? [];
+    } catch (error: any) {
+      throw new Error(error.message || "Error al cargar el top de tecnologías.");
+    }
   },
 
-  async getRecentContacts(): Promise<
-    RecentContact[]
-  > {
-    const res = await safeFetch(
-      "/dashboard/recent-recruitment"
-    );
-
-    const data = await handleResponse<{
-      success: boolean;
-      data: RecentContact[];
-    }>(res);
-
-    return data.data;
+  /**
+   * Obtiene las solicitudes o contactos recientes vinculados a procesos de reclutamiento.
+   */
+  async getRecentContacts(): Promise<RecentContact[]> {
+    try {
+      const response = await apiService.get<BackendResponse<RecentContact[]>>("/dashboard/recent-recruitment");
+      return response.data ?? [];
+    } catch (error: any) {
+      throw new Error(error.message || "Error al obtener contactos recientes de reclutamiento.");
+    }
   },
 
-  async getRecentNotifs(): Promise<
-    RecentNotif[]
-  > {
-    const res = await safeFetch(
-      "/dashboard/notifications"
-    );
-
-    const data = await handleResponse<{
-      success: boolean;
-      data: RecentNotif[];
-    }>(res);
-
-    return data.data;
+  /**
+   * Obtiene el listado de alertas y notificaciones del sistema orientadas al dashboard.
+   */
+  async getRecentNotifs(): Promise<RecentNotif[]> {
+    try {
+      const response = await apiService.get<BackendResponse<RecentNotif[]>>("/dashboard/notifications");
+      return response.data ?? [];
+    } catch (error: any) {
+      throw new Error(error.message || "Error al cargar las notificaciones de control.");
+    }
   },
 };

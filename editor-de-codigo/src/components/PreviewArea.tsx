@@ -10,11 +10,13 @@ export default function PreviewArea({
   onToggleMinify,
   isVisible = true,
   onToggleVisibility,
+  isResizingParent = false, // Nueva propiedad añadida
 }: {
   minified?: boolean;
   onToggleMinify?: () => void;
   isVisible?: boolean;
   onToggleVisibility?: () => void;
+  isResizingParent?: boolean; // Declarada en la interfaz
 }) {
   const { theme } = useTheme();
   const [url, setUrl] = useState<string | null>(null);
@@ -35,18 +37,21 @@ export default function PreviewArea({
 
   const handleRefresh = () => setKey((k) => k + 1);
 
-  if (!isVisible) {
-    return null;
-  }
-
   return (
     <div
-      className="flex flex-col h-full w-full"
+      className="flex flex-col h-full w-full relative"
       style={{ background: "var(--bg-primary)" }}
     >
+      {/* CRITICAL SHIELD: Este div se activa SOLO cuando el panel se está redimensionando. 
+        Previene que el iframe absorba los eventos de mouse e interfiera con el drag.
+      */}
+      {isResizingParent && (
+        <div className="absolute inset-0 z-50 cursor-ew-resize bg-transparent" />
+      )}
+
       {/* Header */}
       <div
-        className="flex h-9 items-center justify-between px-4 shrink-0 border-b text-[12px]"
+        className="flex h-9 items-center justify-between px-4 shrink-0 border-b text-[12px] select-none"
         style={{
           background: "var(--bg-secondary)",
           color: "var(--text-primary)",
@@ -113,7 +118,7 @@ export default function PreviewArea({
       >
         {!url ? (
           <div
-            className="absolute inset-0 flex items-center justify-center p-6 text-center"
+            className="absolute inset-0 flex items-center justify-center p-6 text-center select-none"
             style={{
               background: "var(--bg-primary)",
               color: "var(--text-secondary)",

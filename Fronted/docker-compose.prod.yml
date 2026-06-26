@@ -17,8 +17,12 @@ services:
 
     environment:
       NODE_ENV: production
-      # En producción apunta al dominio real del backend
+      # Una sola variable — sin duplicar con _PROD
       NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL_PROD}
+
+    # Exponer puerto en producción (crítico para EC2)
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
 
     # Sin volumes — imagen inmutable en producción
     restart: always
@@ -30,4 +34,6 @@ services:
           memory: 512M
         reservations:
           cpus: "0.25"
-          memory: 128M
+
+
+

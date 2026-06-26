@@ -1,10 +1,12 @@
-// services/questions.service.ts
+// 📁 services/questions.service.ts
 
-import { apiFetch } from "./api";
+import { apiService } from "./api.service";
 
 // ─────────────────────────────────────────────
 // TIPOS
 // ─────────────────────────────────────────────
+
+export type TipoPregunta = "live_coding" | "teoria" | "debugging" | "arquitectura" | "optimizacion";
 
 /** Shape que devuelve GET /admin/preguntas (con JOINs del model) */
 export interface PreguntaAPI {
@@ -13,26 +15,36 @@ export interface PreguntaAPI {
   enunciado: string;
   tecnologia_id: number;
   nivel_id: number;
-  tipo: string;
+  tipo: TipoPregunta;
   activa: boolean;
   generada_por_ia: boolean;
   tiempo_estimado_min: number;
   fecha_creacion: string;
   prompt_contexto: string | null;
   creada_por: string | null;
+  
   // Campos JOIN
-  tecnologia: string; // t.nombre AS tecnologia
-  nivel: string;      // n.nombre AS nivel
+  tecnologia: string;
+  nivel: string;
+  
+  // NUEVOS CAMPOS del sistema adaptativo
+  categorias_error_objetivo: string[];  // JSON array de slugs
+  sesion_origen_id: string | null;
+  contexto_adaptativo: Record<string, unknown> | null;
 }
 
 export interface Tecnologia {
   id: number;
   nombre: string;
+  slug: string;
+  tipo: string;
+  activo: boolean;
 }
 
 export interface Nivel {
   id: number;
   nombre: string;
+  multiplicador_puntaje: number;
 }
 
 export interface CatalogosPregunta {
@@ -40,132 +52,90 @@ export interface CatalogosPregunta {
   niveles: Nivel[];
 }
 
-export interface CreatePreguntaPayload {
-  tecnologia_id: number;
-  nivel_id: number;
-  titulo: string;
-  enunciado: string;
-  tipo: string;
-  tiempo_estimado_min: number;
-  prompt_contexto?: string;
-}
-
-export type UpdatePreguntaPayload = Partial<CreatePreguntaPayload & { activa: boolean }>;
-
-// ─────────────────────────────────────────────
-// HELPERS INTERNOS
-// ─────────────────────────────────────────────
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error((body as { error?: string })?.error ?? `HTTP ${response.status}`);
-  }
-  const json = await response.json();
-  // DELETE devuelve { success, message } sin .data — lo manejamos arriba
-  return (json.data ?? json) as T;
+/** Interfaz estándar para desenvolver las respuestas del Backend */
+interface BackendResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
 }
 
 // ─────────────────────────────────────────────
-// ENDPOINTS
+// ENDPOINTS (SOLO LECTURA)
 // ─────────────────────────────────────────────
 
 const BASE       = "/admin/preguntas";
 const TECHS_PATH = "/tecnologias";
 const NIVS_PATH  = "/niveles";
 
-// ── GET /admin/preguntas ───────────────────────────────────────────────────────
-
+/**
+ * Obtiene el listado completo de preguntas del banco de reactivos.
+ */
 export async function getPreguntas(): Promise<PreguntaAPI[]> {
-  const response = await apiFetch(BASE);
-  return parseResponse<PreguntaAPI[]>(response);
+  try {
+    const response = await apiService.get<BackendResponse<PreguntaAPI[]>>(BASE);
+    // Tolera tanto envoltorios .data como respuestas directas del backend
+    return response.data ?? (response as any);
+  } catch (error: any) {
+    throw new Error(error.message || "Error al obtener el listado de preguntas.");
+  }
 }
 
-// ── GET /tecnologias + /niveles (en paralelo) ──────────────────────────────────
-
+/**
+ * Recupera catálogos globales de tecnologías y niveles en paralelo para poblar formularios y filtros de búsqueda.
+ */
 export async function getCatalogos(): Promise<CatalogosPregunta> {
-  const [techsRes, nivsRes] = await Promise.all([
-    apiFetch(TECHS_PATH),
-    apiFetch(NIVS_PATH),
-  ]);
+  try {
+    // Las peticiones van en paralelo y aprovechan la cola asíncrona de renovación de token de tu apiService
+    const [techsRes, nivsRes] = await Promise.all([
+      apiService.get<BackendResponse<Tecnologia[]>>(TECHS_PATH),
+      apiService.get<BackendResponse<Nivel[]>>(NIVS_PATH),
+    ]);
 
-  const [tecnologias, niveles] = await Promise.all([
-    parseResponse<Tecnologia[]>(techsRes),
-    parseResponse<Nivel[]>(nivsRes),
-  ]);
+    const tecnologias = techsRes.data ?? (techsRes as any);
+    const niveles = nivsRes.data ?? (nivsRes as any);
 
-  return { tecnologias, niveles };
+    return { tecnologias, niveles };
+  } catch (error: any) {
+    throw new Error(error.message || "Error al cargar los catálogos del sistema.");
+  }
 }
 
-// ── GET /admin/preguntas + catálogos (en paralelo) ─────────────────────────────
-// Carga todo lo necesario para la página en una sola llamada
-
+/**
+ * Gatilla la carga concurrente en paralelo de las preguntas junto con sus respectivos catálogos paramétricos.
+ */
 export async function getPreguntasConCatalogos(): Promise<{
   preguntas: PreguntaAPI[];
   tecnologias: Tecnologia[];
   niveles: Nivel[];
 }> {
-  const [pregRes, techsRes, nivsRes] = await Promise.all([
-    apiFetch(BASE),
-    apiFetch(TECHS_PATH),
-    apiFetch(NIVS_PATH),
-  ]);
+  try {
+    const [pregRes, techsRes, nivsRes] = await Promise.all([
+      apiService.get<BackendResponse<PreguntaAPI[]>>(BASE),
+      apiService.get<BackendResponse<Tecnologia[]>>(TECHS_PATH),
+      apiService.get<BackendResponse<Nivel[]>>(NIVS_PATH),
+    ]);
 
-  const [preguntas, tecnologias, niveles] = await Promise.all([
-    parseResponse<PreguntaAPI[]>(pregRes),
-    parseResponse<Tecnologia[]>(techsRes),
-    parseResponse<Nivel[]>(nivsRes),
-  ]);
+    const preguntas = pregRes.data ?? (pregRes as any);
+    const tecnologias = techsRes.data ?? (techsRes as any);
+    const niveles = nivsRes.data ?? (nivsRes as any);
 
-  return { preguntas, tecnologias, niveles };
-}
-
-// ── POST /admin/preguntas ──────────────────────────────────────────────────────
-
-export async function createPregunta(
-  payload: CreatePreguntaPayload
-): Promise<PreguntaAPI> {
-  const response = await apiFetch(BASE, {
-    method: "POST",
-    body: JSON.stringify({
-      ...payload,
-      prompt_contexto: payload.prompt_contexto || undefined,
-    }),
-  });
-  return parseResponse<PreguntaAPI>(response);
-}
-
-// ── PATCH /admin/preguntas/:id ─────────────────────────────────────────────────
-
-export async function updatePregunta(
-  id: number,
-  payload: UpdatePreguntaPayload
-): Promise<PreguntaAPI> {
-  const response = await apiFetch(`${BASE}/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-  return parseResponse<PreguntaAPI>(response);
-}
-
-// ── PATCH /admin/preguntas/:id  { activa } ─────────────────────────────────────
-// Shortcut semántico para el toggle de estado
-
-export async function togglePreguntaActiva(
-  id: number,
-  activa: boolean
-): Promise<PreguntaAPI> {
-  return updatePregunta(id, { activa });
-}
-
-// ── DELETE /admin/preguntas/:id ────────────────────────────────────────────────
-// Soft delete en el model (pone activa = false, no elimina físicamente)
-
-export async function deletePregunta(id: number): Promise<void> {
-  const response = await apiFetch(`${BASE}/${id}`, { method: "DELETE" });
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error((body as { error?: string })?.error ?? `HTTP ${response.status}`);
+    return { preguntas, tecnologias, niveles };
+  } catch (error: any) {
+    throw new Error(error.message || "Error al compilar la matriz de datos de preguntas.");
   }
 }
+
+/**
+ * Recupera el registro individual de una pregunta según su identificador único numérico.
+ */
+export async function getPreguntaById(id: number): Promise<PreguntaAPI> {
+  try {
+    const response = await apiService.get<BackendResponse<PreguntaAPI>>(`${BASE}/${id}`);
+    return response.data ?? (response as any);
+  } catch (error: any) {
+    throw new Error(error.message || `Error al recuperar la pregunta con ID ${id}.`);
+  }
+}
+
+// Nota: No se incluyen funciones de creación, edición o eliminación
+// porque el administrador solo debe visualizar las preguntas generadas por IA.trg

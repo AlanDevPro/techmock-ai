@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   Files,
-  Search,
   Settings,
   BookOpen,
   type LucideIcon,
@@ -14,7 +13,6 @@ export type ActivityView = "problem" | "explorer" | "search" | "settings";
 const navItems = [
   { icon: BookOpen, label: "Problem", id: "problem" as const },
   { icon: Files, label: "Explorer", id: "explorer" as const },
-  { icon: Search, label: "Search", id: "search" as const },
 ];
 
 const bottomItems = [
